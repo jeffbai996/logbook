@@ -1,95 +1,94 @@
-# dev-log
+# logbook
 
-A tiny CLI for keeping a per-repo decision log. Drops a single `dev-log.md` file at the root of any project and gives you a one-line command to append a structured entry to it.
+A tiny CLI for keeping a per-repo decision log. Drops a single `logbook.md` file at the root of any project and gives you one command to append a structured entry to it.
 
-Built for solo-operator-plus-LLM workflows where heavyweight process (Agile, Jira, ADR templates) is overkill but "wait, why did I do this last month" is a real recurring cost.
+The metaphor is a ship's logbook: append-only, single source of truth, lives with the vessel.
 
 ## Why
 
-In agentic coding, the human is the only thread of continuity across sessions. The agent loses state every time you `/clear`. Architecture decisions, library choices, and rejected approaches live in your head — until they don't, and you spend an hour re-deriving why the database is SQLite instead of Postgres.
+The code shows *what* you did. Commit messages say *what changed*. Neither captures *why you chose this design over the alternatives* — and that's the context you lose first when you come back to a project after a month.
 
-A `dev-log.md` committed in the repo solves this for free:
+The fix is dumb on purpose: a markdown file in the repo, committed in git, with a small CLI to append entries to it. No service, no database, no editor plugin, no SaaS.
 
-- Travels with the code (clone the repo → you have the context)
-- Searchable with `grep` or `git log`
-- Agents can `cat dev-log.md` at session start to bootstrap context
-- No external service, no DB, no ceremony — just markdown in git
-
-This CLI just makes appending entries frictionless enough that you'll actually do it.
+This works whether you code solo, with a team, or alongside an LLM agent. (For agents specifically: the file is plain text in the repo, so `cat logbook.md` at session start gives the agent every architectural decision it needs to bootstrap context.)
 
 ## Not a substitute for
 
-- **README** — explains what the project does, for users
-- **Commit messages** — explain what changed, per change
-- **squad-store** — durable cross-project facts (people, ongoing initiatives, references)
+- **README** — what the project does, for users
+- **Commit messages** — what changed, per change
+- **Design docs** — for decisions that need diagrams, prose, or stakeholder review
 
-dev-log fills the gap between those: *why* you made the structural choices that the code itself can't justify.
+`logbook` fills the gap *between* commits and design docs: the architectural choices the code itself can't explain.
 
 ## Install
 
 ```bash
-git clone git@github.com:jeffbai996/dev-log.git
-cd dev-log
-pip install -e .
+cargo install logbook
 ```
 
-Once installed, `dev-log` is available on `$PATH`.
+Or from source:
+
+```bash
+git clone https://github.com/jeffbai996/logbook.git
+cd logbook
+cargo install --path .
+```
+
+Requires [Rust](https://rustup.rs) 1.75+.
 
 ## Usage
 
 From inside any repo:
 
 ```bash
-dev-log add \
-  --why "polling at 1s was hammering yfinance and getting throttled" \
+logbook add "switched ticker-tape from polling to websocket" \
+  --why "polling at 1s was hammering the upstream API and getting throttled" \
   --rejected "redis pub/sub (overkill for 1 user), SSE (no bidirectional need)" \
-  --risk "websocket connection drops need reconnect logic — added exp backoff" \
-  "switched ticker-tape from polling to websocket"
+  --risk "websocket drops need reconnect logic — added exp backoff"
 ```
 
-This appends a block to `./dev-log.md`:
+This appends a block to `./logbook.md`:
 
 ```markdown
 ## 2026-05-15 — switched ticker-tape from polling to websocket
-**why:** polling at 1s was hammering yfinance and getting throttled
+**why:** polling at 1s was hammering the upstream API and getting throttled
 **rejected:** redis pub/sub (overkill for 1 user), SSE (no bidirectional need)
-**risk:** websocket connection drops need reconnect logic — added exp backoff
+**risk:** websocket drops need reconnect logic — added exp backoff
 ```
 
-Optionally auto-stages the file (`--stage`) so it lands in the next commit.
+Pass `--stage` to also `git add logbook.md` so the entry lands in your next commit.
 
 ### Other commands
 
-- `dev-log init` — creates `dev-log.md` with header if it doesn't exist
-- `dev-log list` — prints all entries newest-first
-- `dev-log search <term>` — greps entries
-- `dev-log last` — shows the most recent entry
+- `logbook init` — create `logbook.md` with a header if it doesn't exist
+- `logbook list` — print all entries, newest first
+- `logbook search <term>` — case-insensitive grep of entries
+- `logbook last` — show the most recent entry
 
 ## Format
 
-Single markdown file, `dev-log.md`, append-only. Each entry is:
+Single markdown file, `logbook.md`, at the project root, append-only. Each entry:
 
 ```markdown
 ## YYYY-MM-DD — <title>
 **why:** <reason this was chosen>
-**rejected:** <alternatives considered and rejected, with brief reason>
-**risk:** <what could go wrong, if anything>
+**rejected:** <alternatives considered and why not, comma-separated>
+**risk:** <what could go wrong>
 ```
 
-Only `--why` is required. `rejected` and `risk` are optional but encouraged for non-obvious choices.
+Only the title and `--why` are required. `--rejected` and `--risk` are optional but recommended.
 
 ## Philosophy
 
 - **One file, in the repo.** No external dependencies, no service to run.
-- **Append-only.** Never edit old entries — superseded decisions get a new entry.
-- **Three fields max.** Why, rejected, risk. If you need more structure than that, write a real design doc.
+- **Append-only.** Never edit old entries. If a decision is reversed, write a new entry that supersedes it.
+- **Three fields max.** Why, rejected, risk. If you need more structure, you need a design doc.
 - **45 seconds per entry.** If it takes longer, the tool is wrong.
-- **Solo-operator scope.** This is not for teams. Teams have other tools.
 
 ## Status
 
-Draft / pre-alpha. README first, code second. Planning to implement after the spec settles.
+`0.0.1` — minimum viable. `init`, `add`, `list`, `search`, `last` commands work. No tests yet, no error-message polish, no `cargo install logbook` until published to crates.io.
 
 ## License
 
-TBD (probably MIT — placeholder).
+MIT

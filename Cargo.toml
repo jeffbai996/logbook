@@ -1,0 +1,21 @@
+[package]
+name = "logbook"
+version = "0.0.1"
+edition = "2021"
+authors = ["Jeff Bai"]
+description = "A tiny CLI for keeping a per-repo decision log."
+license = "MIT"
+repository = "https://github.com/jeffbai996/logbook"
+readme = "README.md"
+keywords = ["cli", "decision-log", "markdown", "adr"]
+categories = ["command-line-utilities", "development-tools"]
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+anyhow = "1.0"
+
+[profile.release]
+strip = true
+lto = true
+opt-level = "z"
