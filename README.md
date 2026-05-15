@@ -36,34 +36,43 @@ cargo install --path .
 
 Requires [Rust](https://rustup.rs) 1.75+.
 
-## Usage
-
-From inside any repo:
+## Quickstart
 
 ```bash
-logbook add "switched ticker-tape from polling to websocket" \
+cd ~/your-project
+logbook init
+logbook add "switched from polling to websocket" \
   --why "polling at 1s was hammering the upstream API and getting throttled" \
-  --rejected "redis pub/sub (overkill for 1 user), SSE (no bidirectional need)" \
-  --risk "websocket drops need reconnect logic — added exp backoff"
+  --rejected "redis pub/sub (overkill), SSE (no bidirectional need)" \
+  --risk "websocket drops need reconnect logic — added exp backoff" \
+  --tag refactor --tag perf \
+  --stage
 ```
 
-This appends a block to `./logbook.md`:
+This appends a block to `./logbook.md` and stages it for the next commit:
 
 ```markdown
-## 2026-05-15 — switched ticker-tape from polling to websocket
+## 2026-05-15 — switched from polling to websocket
 **why:** polling at 1s was hammering the upstream API and getting throttled
-**rejected:** redis pub/sub (overkill for 1 user), SSE (no bidirectional need)
+**rejected:** redis pub/sub (overkill), SSE (no bidirectional need)
 **risk:** websocket drops need reconnect logic — added exp backoff
+**tags:** refactor, perf
 ```
 
-Pass `--stage` to also `git add logbook.md` so the entry lands in your next commit.
+## Commands
 
-### Other commands
+| Command | What it does |
+|---|---|
+| `logbook init` | Create `logbook.md` with a header. Idempotent. |
+| `logbook add <title> --why <reason> [--rejected …] [--risk …] [--tag X]… [--stage]` | Append a new entry. `--tag` is repeatable. `--stage` runs `git add`. |
+| `logbook list [--tag X]` | Print entries newest-first. Optional tag filter (case-insensitive, exact match). |
+| `logbook last` | Print the most recent entry only. |
+| `logbook show <YYYY-MM-DD>` | Print every entry from a specific date. |
+| `logbook search <term>` | Case-insensitive substring search across all entries. |
+| `logbook tags` | List all distinct tags with usage counts. |
+| `logbook stats` | Total entries, date range, entries-this-month, unique tags. |
 
-- `logbook init` — create `logbook.md` with a header if it doesn't exist
-- `logbook list` — print all entries, newest first
-- `logbook search <term>` — case-insensitive grep of entries
-- `logbook last` — show the most recent entry
+Run `logbook --help` or `logbook <cmd> --help` for full flag reference.
 
 ## Format
 
@@ -72,22 +81,64 @@ Single markdown file, `logbook.md`, at the project root, append-only. Each entry
 ```markdown
 ## YYYY-MM-DD — <title>
 **why:** <reason this was chosen>
-**rejected:** <alternatives considered and why not, comma-separated>
+**rejected:** <alternatives considered and why not>
 **risk:** <what could go wrong>
+**tags:** <comma-separated tags>
 ```
 
-Only the title and `--why` are required. `--rejected` and `--risk` are optional but recommended.
+Only the title and `--why` are required. `--rejected`, `--risk`, and `--tag` are optional but recommended for non-trivial decisions.
+
+Because the format is plain markdown with stable headings, you can hand-edit `logbook.md` directly if you ever need to. The CLI only ever appends — it won't rewrite what's already there.
 
 ## Philosophy
 
 - **One file, in the repo.** No external dependencies, no service to run.
 - **Append-only.** Never edit old entries. If a decision is reversed, write a new entry that supersedes it.
-- **Three fields max.** Why, rejected, risk. If you need more structure, you need a design doc.
+- **Few fields.** Why, rejected, risk, tags. If you need more structure, you need a design doc.
 - **45 seconds per entry.** If it takes longer, the tool is wrong.
+- **Markdown over JSON.** A logbook is for humans first, machines second. Markdown reads well in `cat`, in GitHub, in your editor, in `less`, and in an LLM's context window.
+
+## Use with LLM agents
+
+A common workflow: have your agent (Claude Code, Cursor, Aider, etc.) read `logbook.md` at the start of every session so it inherits your accumulated decisions. Example for Claude Code, in `CLAUDE.md`:
+
+```markdown
+At session start, run: `logbook list | head -100`
+Treat every entry as an architectural constraint unless explicitly superseded.
+When you make a non-obvious choice, suggest a `logbook add` command for the user to run.
+```
+
+This makes the logbook the agent's long-term memory for the project, with zero infrastructure beyond the file itself.
+
+## Roadmap
+
+**0.1.0 — robustness**
+- Test suite (currently `tests/` is a placeholder)
+- Better error messages (current ones are functional but terse)
+- Atomic writes to survive concurrent invocations
+- Honor `LOGBOOK_FILE` env var to allow custom filenames
+
+**0.2.0 — distribution**
+- Publish to crates.io so `cargo install logbook` actually works
+- Prebuilt binaries via GitHub Releases for macOS, Linux, Windows (no Rust toolchain required to install)
+- Homebrew tap
+
+**0.3.0 — ergonomics**
+- `logbook add` opens `$EDITOR` when `--why` is omitted (git-commit style)
+- `logbook supersede <date> "new title" --why ...` — formal supersession syntax that links the new entry to the old one
+- Colored TTY output (off when piped)
+- `logbook export --format json` for tooling integrations
+
+**Maybe-someday**
+- Shell completion (`logbook completions bash`)
+- A read-only web viewer that renders `logbook.md` as a timeline
+- Squad/team mode: aggregate logbooks across multiple repos for retro reviews
+
+Not on the roadmap: editing past entries, deleting entries, server-mode, GUI, plugins. Scope creep is the enemy.
 
 ## Status
 
-`0.0.1` — minimum viable. `init`, `add`, `list`, `search`, `last` commands work. No tests yet, no error-message polish, no `cargo install logbook` until published to crates.io.
+`0.0.2` — functional, dogfooded on this repo's own `logbook.md`. No published crate yet (build from source for now). Use it, file issues, propose features.
 
 ## License
 

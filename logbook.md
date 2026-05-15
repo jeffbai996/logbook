@@ -17,3 +17,9 @@ Newest entries at the bottom. Generated and maintained by `logbook` — https://
 **why:** constraint forces conciseness — 45 seconds per entry. More fields = drift toward design-doc territory which has its own home
 **rejected:** free-form body (loses structure); ADR full template (too heavy); single 'notes' field (loses the rejected/risk discipline)
 
+## 2026-05-15 — 0.0.2 — tags, show, stats, tags-list
+**why:** feature-creep within the philosophy: tags enable cross-cutting concerns without breaking append-only; show <date> answers 'what did i decide tuesday'; stats gives a habit-tracker signal for dogfood feedback
+**rejected:** color output (defer to 0.3.0 — needs TTY detection); --message-file/editor mode (defer to 0.3.0); supersede syntax (needs more spec time)
+**risk:** now reading + parsing the whole file on read commands — fine until a logbook has thousands of entries, then we want streaming/index
+**tags:** features, scope
+
