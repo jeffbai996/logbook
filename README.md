@@ -63,16 +63,21 @@ This appends a block to `./logbook.md` and stages it for the next commit:
 
 | Command | What it does |
 |---|---|
-| `logbook init` | Create `logbook.md` with a header. Idempotent. |
-| `logbook add <title> --why <reason> [--rejected …] [--risk …] [--tag X]… [--stage]` | Append a new entry. `--tag` is repeatable. `--stage` runs `git add`. |
-| `logbook list [--tag X]` | Print entries newest-first. Optional tag filter (case-insensitive, exact match). |
+| `logbook init` | Create the logbook file with a header. Idempotent. |
+| `logbook add <title> --why <reason> [--rejected …] [--risk …] [--tag X]… [--stage] [--print]` | Append a new entry. `--tag` is repeatable. `--stage` runs `git add`. `--print` echoes the rendered block. |
+| `logbook list [--tag X] [--since YYYY-MM-DD] [--until YYYY-MM-DD]` | Print entries newest-first with optional filters (all combinable). |
 | `logbook last` | Print the most recent entry only. |
 | `logbook show <YYYY-MM-DD>` | Print every entry from a specific date. |
 | `logbook search <term>` | Case-insensitive substring search across all entries. |
 | `logbook tags` | List all distinct tags with usage counts. |
 | `logbook stats` | Total entries, date range, entries-this-month, unique tags. |
+| `logbook where` | Print the resolved logbook file path (honors `LOGBOOK_FILE`). |
 
 Run `logbook --help` or `logbook <cmd> --help` for full flag reference.
+
+### Environment
+
+- `LOGBOOK_FILE` — override the default `./logbook.md` with any path. Useful for monorepos (`LOGBOOK_FILE=docs/decisions.md`) or for keeping a personal log outside the working directory.
 
 ## Format
 
@@ -112,11 +117,11 @@ This makes the logbook the agent's long-term memory for the project, with zero i
 
 ## Roadmap
 
-**0.1.0 — robustness**
+**0.1.0 — testing & polish**
 - Test suite (currently `tests/` is a placeholder)
 - Better error messages (current ones are functional but terse)
-- Atomic writes to survive concurrent invocations
-- Honor `LOGBOOK_FILE` env var to allow custom filenames
+- ~~Atomic writes to survive concurrent invocations~~ ✅ shipped in 0.0.3
+- ~~Honor `LOGBOOK_FILE` env var to allow custom filenames~~ ✅ shipped in 0.0.3
 
 **0.2.0 — distribution**
 - Publish to crates.io so `cargo install logbook` actually works
@@ -138,7 +143,7 @@ Not on the roadmap: editing past entries, deleting entries, server-mode, GUI, pl
 
 ## Status
 
-`0.0.2` — functional, dogfooded on this repo's own `logbook.md`. No published crate yet (build from source for now). Use it, file issues, propose features.
+`0.0.3` — functional, dogfooded on this repo's own `logbook.md`, with atomic writes and configurable file location. No published crate yet (build from source for now). Use it, file issues, propose features.
 
 ## License
 

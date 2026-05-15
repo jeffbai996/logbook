@@ -1,6 +1,6 @@
 [package]
 name = "logbook"
-version = "0.0.2"
+version = "0.0.3"
 edition = "2021"
 authors = ["Jeff Bai"]
 description = "A tiny CLI for keeping a per-repo decision log."

@@ -2,12 +2,15 @@ use anyhow::{bail, Context, Result};
 use chrono::Local;
 use clap::{Parser, Subcommand};
 use std::collections::BTreeMap;
+use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const LOGBOOK_FILE: &str = "logbook.md";
+const DEFAULT_LOGBOOK_FILE: &str = "logbook.md";
+const ENV_VAR: &str = "LOGBOOK_FILE";
+
 const HEADER: &str = "# logbook\n\nAppend-only record of architectural decisions for this project.\nNewest entries at the bottom. Generated and maintained by `logbook` — https://github.com/jeffbai996/logbook\n\n";
 
 #[derive(Parser)]
@@ -19,7 +22,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Create logbook.md at the current directory if it doesn't exist
+    /// Create the logbook file at the current directory if it doesn't exist
     Init,
 
     /// Append a new entry
@@ -43,16 +46,28 @@ enum Cmd {
         #[arg(long = "tag", value_name = "TAG")]
         tags: Vec<String>,
 
-        /// Also run `git add logbook.md` after writing
+        /// Also run `git add <logbook>` after writing
         #[arg(long)]
         stage: bool,
+
+        /// Echo the rendered entry block to stdout after writing
+        #[arg(long)]
+        print: bool,
     },
 
-    /// Print all entries, newest first
+    /// Print entries, newest first, with optional filters
     List {
         /// Filter entries to those carrying this tag (case-insensitive)
         #[arg(long)]
         tag: Option<String>,
+
+        /// Only entries on or after this date (YYYY-MM-DD)
+        #[arg(long)]
+        since: Option<String>,
+
+        /// Only entries on or before this date (YYYY-MM-DD)
+        #[arg(long)]
+        until: Option<String>,
     },
 
     /// Case-insensitive search across entries
@@ -75,6 +90,9 @@ enum Cmd {
 
     /// Summary statistics: total entries, date range, entries this month
     Stats,
+
+    /// Print the resolved logbook file path (honoring LOGBOOK_FILE env var)
+    Where,
 }
 
 fn main() -> Result<()> {
@@ -88,23 +106,33 @@ fn main() -> Result<()> {
             risk,
             tags,
             stage,
-        } => add(title, why, rejected, risk, tags, stage),
-        Cmd::List { tag } => list(tag.as_deref()),
+            print,
+        } => add(title, why, rejected, risk, tags, stage, print),
+        Cmd::List { tag, since, until } => list(tag.as_deref(), since.as_deref(), until.as_deref()),
         Cmd::Search { term } => search(&term),
         Cmd::Last => last(),
         Cmd::Show { date } => show(&date),
         Cmd::Tags => tags_cmd(),
         Cmd::Stats => stats(),
+        Cmd::Where => print_where(),
     }
 }
 
+/// Resolve the logbook file path. `LOGBOOK_FILE` overrides; default is `./logbook.md`.
 fn logbook_path() -> PathBuf {
-    PathBuf::from(LOGBOOK_FILE)
+    env::var_os(ENV_VAR)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_LOGBOOK_FILE))
 }
 
 fn ensure_exists() -> Result<()> {
-    if !logbook_path().exists() {
-        bail!("no logbook.md in current directory. Run `logbook init` first.");
+    let p = logbook_path();
+    if !p.exists() {
+        bail!(
+            "no logbook file at {}. Run `logbook init` first (or set {} to point elsewhere).",
+            p.display(),
+            ENV_VAR
+        );
     }
     Ok(())
 }
@@ -112,11 +140,49 @@ fn ensure_exists() -> Result<()> {
 fn init() -> Result<()> {
     let path = logbook_path();
     if path.exists() {
-        println!("logbook.md already exists, leaving it alone");
+        println!("{} already exists, leaving it alone", path.display());
         return Ok(());
     }
-    fs::write(&path, HEADER).context("failed to create logbook.md")?;
-    println!("created logbook.md");
+    fs::write(&path, HEADER)
+        .with_context(|| format!("failed to create {}", path.display()))?;
+    println!("created {}", path.display());
+    Ok(())
+}
+
+/// Atomically append by reading current contents, appending in memory, writing
+/// to a sibling tempfile, then renaming. Renames are atomic on POSIX and on
+/// NTFS via ReplaceFile semantics, so a crashed run can't leave a half-written
+/// entry behind.
+fn atomic_append(path: &Path, block: &str) -> Result<()> {
+    let existing = if path.exists() {
+        fs::read(path).with_context(|| format!("failed to read {}", path.display()))?
+    } else {
+        Vec::new()
+    };
+    let tmp = path.with_extension(format!(
+        "{}.tmp",
+        path.extension().and_then(|e| e.to_str()).unwrap_or("md")
+    ));
+    {
+        let mut f = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&tmp)
+            .with_context(|| format!("failed to open temp file {}", tmp.display()))?;
+        f.write_all(&existing)
+            .with_context(|| format!("failed to copy existing contents to {}", tmp.display()))?;
+        f.write_all(block.as_bytes())
+            .with_context(|| format!("failed to write new entry to {}", tmp.display()))?;
+        f.sync_all().ok();
+    }
+    fs::rename(&tmp, path).with_context(|| {
+        format!(
+            "failed to rename {} → {} (logbook may be inconsistent)",
+            tmp.display(),
+            path.display()
+        )
+    })?;
     Ok(())
 }
 
@@ -127,11 +193,13 @@ fn add(
     risk: Option<String>,
     tags: Vec<String>,
     stage: bool,
+    print: bool,
 ) -> Result<()> {
     let path = logbook_path();
     if !path.exists() {
-        fs::write(&path, HEADER).context("failed to auto-init logbook.md")?;
-        println!("auto-created logbook.md");
+        fs::write(&path, HEADER)
+            .with_context(|| format!("failed to auto-init {}", path.display()))?;
+        println!("auto-created {}", path.display());
     }
 
     let date = Local::now().format("%Y-%m-%d").to_string();
@@ -152,18 +220,18 @@ fn add(
     }
     block.push('\n');
 
-    let mut f = OpenOptions::new()
-        .append(true)
-        .open(&path)
-        .context("failed to open logbook.md for append")?;
-    f.write_all(block.as_bytes())
-        .context("failed to write entry")?;
+    atomic_append(&path, &block)?;
 
     println!("added: {date} — {title}");
 
+    if print {
+        println!("---");
+        print!("{block}");
+    }
+
     if stage {
         git_add(&path)?;
-        println!("staged logbook.md");
+        println!("staged {}", path.display());
     }
 
     Ok(())
@@ -179,7 +247,8 @@ struct Entry {
 
 fn read_entries() -> Result<Vec<Entry>> {
     ensure_exists()?;
-    let text = fs::read_to_string(logbook_path()).context("failed to read logbook.md")?;
+    let p = logbook_path();
+    let text = fs::read_to_string(&p).with_context(|| format!("failed to read {}", p.display()))?;
     let mut entries: Vec<Entry> = Vec::new();
     let mut current: Vec<&str> = Vec::new();
 
@@ -205,12 +274,11 @@ fn make_entry(lines: &[&str]) -> Entry {
     while raw.ends_with('\n') || raw.ends_with(' ') {
         raw.pop();
     }
-    // Header form: "## YYYY-MM-DD — title"
     let header = lines.first().copied().unwrap_or("");
     let date = header
         .strip_prefix("## ")
         .and_then(|s| s.split_whitespace().next())
-        .filter(|d| d.len() == 10 && d.chars().filter(|c| *c == '-').count() == 2)
+        .filter(|d| is_date_shaped(d))
         .map(|d| d.to_string());
 
     let mut tags: Vec<String> = Vec::new();
@@ -228,7 +296,31 @@ fn make_entry(lines: &[&str]) -> Entry {
     Entry { raw, date, tags }
 }
 
-fn list(tag_filter: Option<&str>) -> Result<()> {
+fn is_date_shaped(s: &str) -> bool {
+    s.len() == 10
+        && s.chars().filter(|c| *c == '-').count() == 2
+        && s.chars().filter(|c| c.is_ascii_digit() || *c == '-').count() == s.len()
+}
+
+fn validate_date_arg(name: &str, value: &str) -> Result<()> {
+    if !is_date_shaped(value) {
+        bail!("--{name} must be YYYY-MM-DD (got: \"{value}\")");
+    }
+    Ok(())
+}
+
+fn list(
+    tag_filter: Option<&str>,
+    since: Option<&str>,
+    until: Option<&str>,
+) -> Result<()> {
+    if let Some(s) = since {
+        validate_date_arg("since", s)?;
+    }
+    if let Some(u) = until {
+        validate_date_arg("until", u)?;
+    }
+
     let entries = read_entries()?;
     if entries.is_empty() {
         println!("(no entries yet)");
@@ -242,13 +334,23 @@ fn list(tag_filter: Option<&str>) -> Result<()> {
                 continue;
             }
         }
+        if let Some(s) = since {
+            match entry.date.as_deref() {
+                Some(d) if d >= s => {}
+                _ => continue,
+            }
+        }
+        if let Some(u) = until {
+            match entry.date.as_deref() {
+                Some(d) if d <= u => {}
+                _ => continue,
+            }
+        }
         println!("{}\n", entry.raw);
         hits += 1;
     }
     if hits == 0 {
-        if let Some(t) = tag_filter {
-            println!("no entries tagged \"{t}\"");
-        }
+        println!("no entries match the given filters");
     }
     Ok(())
 }
@@ -279,10 +381,7 @@ fn last() -> Result<()> {
 }
 
 fn show(date: &str) -> Result<()> {
-    // Validate the date shape — we accept anything that looks like YYYY-MM-DD.
-    if date.len() != 10 || date.chars().filter(|c| *c == '-').count() != 2 {
-        bail!("date must be in YYYY-MM-DD form (got: \"{date}\")");
-    }
+    validate_date_arg("date", date)?;
     let entries = read_entries()?;
     let mut hits = 0;
     for entry in entries.iter() {
@@ -309,7 +408,6 @@ fn tags_cmd() -> Result<()> {
         println!("(no tags yet — add entries with --tag <name>)");
         return Ok(());
     }
-    // Sort by descending count, then alpha
     let mut rows: Vec<(String, usize)> = counts.into_iter().collect();
     rows.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
     let max_name = rows.iter().map(|(n, _)| n.len()).max().unwrap_or(0);
@@ -348,6 +446,16 @@ fn stats() -> Result<()> {
     println!("date range:    {first} → {last}");
     println!("this month:    {this_month}");
     println!("unique tags:   {unique_tags}");
+    Ok(())
+}
+
+fn print_where() -> Result<()> {
+    let p = logbook_path();
+    let abs = p.canonicalize().unwrap_or_else(|_| p.clone());
+    println!("{}", abs.display());
+    if !p.exists() {
+        eprintln!("(file does not exist yet — run `logbook init`)");
+    }
     Ok(())
 }
 

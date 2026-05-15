@@ -23,3 +23,9 @@ Newest entries at the bottom. Generated and maintained by `logbook` — https://
 **risk:** now reading + parsing the whole file on read commands — fine until a logbook has thousands of entries, then we want streaming/index
 **tags:** features, scope
 
+## 2026-05-15 — 0.0.3 — atomic writes, LOGBOOK_FILE env var, --since/--until, --print, where
+**why:** first robustness pass before 0.1.0 tests. atomic write via tmp+rename means a crashed CLI run can never leave a half-written entry; LOGBOOK_FILE unblocks monorepos and personal-log use cases; --since/--until generalize the show command for time-window queries; --print supports piping into other tools; 'where' makes the env-var resolution debuggable
+**rejected:** fsync on every write (overkill for human-pace writes — sync_all on the tmp file is enough); --message-file/editor mode (defer to 0.3.0, needs  spawn logic); file locking via fcntl (overkill — atomic rename solves the race we actually have)
+**risk:** atomic_append reads the whole file into memory before writing — fine for <10MB logbooks, becomes a problem in the millions-of-entries case but that's not the target user. tmp file lives next to logbook.md briefly during write — if the dir is read-only this fails loudly which is the correct behavior
+**tags:** features, robustness
+
