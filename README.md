@@ -117,11 +117,12 @@ This makes the logbook the agent's long-term memory for the project, with zero i
 
 ## Roadmap
 
-**0.1.0 — testing & polish**
-- Test suite (currently `tests/` is a placeholder)
-- Better error messages (current ones are functional but terse)
+**0.1.0 — testing & polish** ✅ *current*
+- ~~Test suite~~ ✅ 22 unit tests + 19 integration tests (`cargo test`)
+- ~~Better error messages~~ ✅ typed `Error` enum with `NotFound`, `BadDate`, `Io`, `Git` variants
 - ~~Atomic writes to survive concurrent invocations~~ ✅ shipped in 0.0.3
 - ~~Honor `LOGBOOK_FILE` env var to allow custom filenames~~ ✅ shipped in 0.0.3
+- CI on push and PR: build/test on Linux/macOS/Windows + `cargo fmt --check` + `cargo clippy -D warnings`
 
 **0.2.0 — distribution**
 - Publish to crates.io so `cargo install logbook` actually works
@@ -141,9 +142,29 @@ This makes the logbook the agent's long-term memory for the project, with zero i
 
 Not on the roadmap: editing past entries, deleting entries, server-mode, GUI, plugins. Scope creep is the enemy.
 
+## Development
+
+```bash
+git clone https://github.com/jeffbai996/logbook.git
+cd logbook
+cargo build              # debug build
+cargo test               # full test suite (unit + integration)
+cargo fmt --all          # format
+cargo clippy --all-targets -- -D warnings
+```
+
+The codebase is laid out as a library + binary:
+
+- `src/lib.rs` — public re-exports, `logbook_path()`, `today()`, `is_date_shaped()`
+- `src/error.rs` — typed `Error` enum
+- `src/parse.rs` — pure markdown → `Vec<Entry>` parser
+- `src/store.rs` — file I/O, including atomic-append
+- `src/main.rs` — `clap` CLI definitions + dispatch (thin)
+- `tests/cli.rs` — integration tests that spawn the real binary against a tempdir
+
 ## Status
 
-`0.0.3` — functional, dogfooded on this repo's own `logbook.md`, with atomic writes and configurable file location. No published crate yet (build from source for now). Use it, file issues, propose features.
+`0.1.0` — first version meant to be depended on. 41 tests, CI on three OSes, typed errors. Not yet published to crates.io (build from source for now — `cargo install --path .` from a clone).
 
 ## License
 
