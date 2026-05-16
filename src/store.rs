@@ -105,3 +105,108 @@ fn tmp_path_for(path: &Path) -> std::path::PathBuf {
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("md");
     path.with_extension(format!("{ext}.tmp"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn ri<'a>(
+        date: &'a str,
+        title: &'a str,
+        why: &'a str,
+        rejected: Option<&'a str>,
+        risk: Option<&'a str>,
+        tags: &'a [String],
+    ) -> RenderInput<'a> {
+        RenderInput { date, title, why, rejected, risk, tags }
+    }
+
+    #[test]
+    fn renders_minimal_entry() {
+        let tags: Vec<String> = vec![];
+        let out = render_entry_block(&ri("2026-05-16", "t", "w", None, None, &tags));
+        assert_eq!(out, "## 2026-05-16 — t\n**why:** w\n\n");
+    }
+
+    #[test]
+    fn renders_full_entry_in_canonical_order() {
+        let tags = vec!["a".into(), "b".into()];
+        let out = render_entry_block(&ri(
+            "2026-05-16",
+            "t",
+            "w",
+            Some("rej"),
+            Some("rsk"),
+            &tags,
+        ));
+        let expected = "## 2026-05-16 — t\n**why:** w\n**rejected:** rej\n**risk:** rsk\n**tags:** a, b\n\n";
+        assert_eq!(out, expected);
+    }
+
+    #[test]
+    fn omits_empty_optional_fields() {
+        let tags: Vec<String> = vec![];
+        let out = render_entry_block(&ri(
+            "2026-05-16",
+            "t",
+            "w",
+            Some("   "),
+            Some(""),
+            &tags,
+        ));
+        // Whitespace-only rejected/risk should be dropped, not rendered as blank lines.
+        assert_eq!(out, "## 2026-05-16 — t\n**why:** w\n\n");
+    }
+
+    #[test]
+    fn trims_and_drops_empty_tags() {
+        let tags = vec!["  refactor  ".into(), "".into(), "perf".into()];
+        let out = render_entry_block(&ri("2026-05-16", "t", "w", None, None, &tags));
+        assert!(out.contains("**tags:** refactor, perf\n"));
+    }
+
+    #[test]
+    fn init_file_creates_then_is_idempotent() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("logbook.md");
+        assert!(init_file(&path).unwrap());
+        assert!(!init_file(&path).unwrap()); // already exists
+        let contents = std::fs::read_to_string(&path).unwrap();
+        assert!(contents.starts_with("# logbook"));
+    }
+
+    #[test]
+    fn read_text_returns_not_found_when_missing() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("missing.md");
+        let err = read_text(&path).unwrap_err();
+        assert!(matches!(err, Error::NotFound { .. }));
+    }
+
+    #[test]
+    fn atomic_append_writes_block_and_preserves_existing() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("logbook.md");
+        init_file(&path).unwrap();
+        let original = std::fs::read_to_string(&path).unwrap();
+
+        let block = "## 2026-05-16 — t\n**why:** w\n\n";
+        atomic_append(&path, block).unwrap();
+
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(after, format!("{original}{block}"));
+    }
+
+    #[test]
+    fn atomic_append_leaves_no_tmp_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("logbook.md");
+        init_file(&path).unwrap();
+        atomic_append(&path, "## 2026-05-16 — t\n**why:** w\n\n").unwrap();
+
+        // No "logbook.md.tmp" lingering after a successful rename.
+        let tmp = dir.path().join("logbook.md.tmp");
+        assert!(!tmp.exists(), "tempfile should be renamed away, not left behind");
+    }
+}

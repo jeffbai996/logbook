@@ -51,3 +51,35 @@ pub fn is_date_shaped(s: &str) -> bool {
         && bytes[5..7].iter().all(|b| b.is_ascii_digit())
         && bytes[8..].iter().all(|b| b.is_ascii_digit())
 }
+
+#[cfg(test)]
+mod date_tests {
+    use super::is_date_shaped;
+
+    #[test]
+    fn accepts_valid_shape() {
+        assert!(is_date_shaped("2026-05-16"));
+        assert!(is_date_shaped("0001-01-01"));
+        assert!(is_date_shaped("9999-12-31"));
+    }
+
+    #[test]
+    fn rejects_wrong_length() {
+        assert!(!is_date_shaped(""));
+        assert!(!is_date_shaped("2026-5-16"));
+        assert!(!is_date_shaped("2026-05-16T00:00:00"));
+    }
+
+    #[test]
+    fn rejects_non_digit_or_dash_chars() {
+        assert!(!is_date_shaped("banana1234"));
+        assert!(!is_date_shaped("2026/05/16"));
+        assert!(!is_date_shaped("2O26-05-16")); // capital O, not zero
+    }
+
+    #[test]
+    fn rejects_misplaced_dashes() {
+        assert!(!is_date_shaped("20-2605-16"));
+        assert!(!is_date_shaped("2026-0516-"));
+    }
+}
