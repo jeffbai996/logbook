@@ -1,17 +1,11 @@
-use anyhow::{bail, Context, Result};
-use chrono::Local;
 use clap::{Parser, Subcommand};
+use logbook::{
+    atomic_append, init_file, is_date_shaped, logbook_path, parse_entries, read_text,
+    render_entry_block, today, Entry, Error, RenderInput, Result, ENV_VAR,
+};
 use std::collections::BTreeMap;
-use std::env;
-use std::fs::{self, OpenOptions};
-use std::io::Write;
-use std::path::{Path, PathBuf};
-use std::process::Command;
-
-const DEFAULT_LOGBOOK_FILE: &str = "logbook.md";
-const ENV_VAR: &str = "LOGBOOK_FILE";
-
-const HEADER: &str = "# logbook\n\nAppend-only record of architectural decisions for this project.\nNewest entries at the bottom. Generated and maintained by `logbook` — https://github.com/jeffbai996/logbook\n\n";
+use std::path::Path;
+use std::process::{Command, ExitCode};
 
 #[derive(Parser)]
 #[command(name = "logbook", version, about = "Per-repo decision log CLI", long_about = None)]
@@ -29,27 +23,18 @@ enum Cmd {
     Add {
         /// Short title for the entry
         title: String,
-
-        /// Why this decision was made
         #[arg(long)]
         why: String,
-
-        /// Alternatives that were rejected, with brief reasons
         #[arg(long)]
         rejected: Option<String>,
-
-        /// What could go wrong with this choice
         #[arg(long)]
         risk: Option<String>,
-
         /// One or more tags (repeatable: --tag refactor --tag db)
         #[arg(long = "tag", value_name = "TAG")]
         tags: Vec<String>,
-
         /// Also run `git add <logbook>` after writing
         #[arg(long)]
         stage: bool,
-
         /// Echo the rendered entry block to stdout after writing
         #[arg(long)]
         print: bool,
@@ -57,33 +42,22 @@ enum Cmd {
 
     /// Print entries, newest first, with optional filters
     List {
-        /// Filter entries to those carrying this tag (case-insensitive)
         #[arg(long)]
         tag: Option<String>,
-
-        /// Only entries on or after this date (YYYY-MM-DD)
         #[arg(long)]
         since: Option<String>,
-
-        /// Only entries on or before this date (YYYY-MM-DD)
         #[arg(long)]
         until: Option<String>,
     },
 
     /// Case-insensitive search across entries
-    Search {
-        /// Term to search for
-        term: String,
-    },
+    Search { term: String },
 
     /// Print only the most recent entry
     Last,
 
     /// Print all entries from a given date (YYYY-MM-DD)
-    Show {
-        /// Date string, e.g. 2026-05-15
-        date: String,
-    },
+    Show { date: String },
 
     /// List all distinct tags with usage counts
     Tags,
@@ -91,13 +65,23 @@ enum Cmd {
     /// Summary statistics: total entries, date range, entries this month
     Stats,
 
-    /// Print the resolved logbook file path (honoring LOGBOOK_FILE env var)
+    /// Print the resolved logbook file path (honors LOGBOOK_FILE)
     Where,
 }
 
-fn main() -> Result<()> {
+fn main() -> ExitCode {
     let cli = Cli::parse();
-    match cli.cmd {
+    match dispatch(cli.cmd) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("error: {e}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn dispatch(cmd: Cmd) -> Result<()> {
+    match cmd {
         Cmd::Init => init(),
         Cmd::Add {
             title,
@@ -118,71 +102,13 @@ fn main() -> Result<()> {
     }
 }
 
-/// Resolve the logbook file path. `LOGBOOK_FILE` overrides; default is `./logbook.md`.
-fn logbook_path() -> PathBuf {
-    env::var_os(ENV_VAR)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(DEFAULT_LOGBOOK_FILE))
-}
-
-fn ensure_exists() -> Result<()> {
-    let p = logbook_path();
-    if !p.exists() {
-        bail!(
-            "no logbook file at {}. Run `logbook init` first (or set {} to point elsewhere).",
-            p.display(),
-            ENV_VAR
-        );
-    }
-    Ok(())
-}
-
 fn init() -> Result<()> {
     let path = logbook_path();
-    if path.exists() {
-        println!("{} already exists, leaving it alone", path.display());
-        return Ok(());
-    }
-    fs::write(&path, HEADER)
-        .with_context(|| format!("failed to create {}", path.display()))?;
-    println!("created {}", path.display());
-    Ok(())
-}
-
-/// Atomically append by reading current contents, appending in memory, writing
-/// to a sibling tempfile, then renaming. Renames are atomic on POSIX and on
-/// NTFS via ReplaceFile semantics, so a crashed run can't leave a half-written
-/// entry behind.
-fn atomic_append(path: &Path, block: &str) -> Result<()> {
-    let existing = if path.exists() {
-        fs::read(path).with_context(|| format!("failed to read {}", path.display()))?
+    if init_file(&path)? {
+        println!("created {}", path.display());
     } else {
-        Vec::new()
-    };
-    let tmp = path.with_extension(format!(
-        "{}.tmp",
-        path.extension().and_then(|e| e.to_str()).unwrap_or("md")
-    ));
-    {
-        let mut f = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&tmp)
-            .with_context(|| format!("failed to open temp file {}", tmp.display()))?;
-        f.write_all(&existing)
-            .with_context(|| format!("failed to copy existing contents to {}", tmp.display()))?;
-        f.write_all(block.as_bytes())
-            .with_context(|| format!("failed to write new entry to {}", tmp.display()))?;
-        f.sync_all().ok();
+        println!("{} already exists, leaving it alone", path.display());
     }
-    fs::rename(&tmp, path).with_context(|| {
-        format!(
-            "failed to rename {} → {} (logbook may be inconsistent)",
-            tmp.display(),
-            path.display()
-        )
-    })?;
     Ok(())
 }
 
@@ -196,30 +122,19 @@ fn add(
     print: bool,
 ) -> Result<()> {
     let path = logbook_path();
-    if !path.exists() {
-        fs::write(&path, HEADER)
-            .with_context(|| format!("failed to auto-init {}", path.display()))?;
+    if init_file(&path)? {
         println!("auto-created {}", path.display());
     }
 
-    let date = Local::now().format("%Y-%m-%d").to_string();
-    let mut block = format!("## {date} — {title}\n**why:** {why}\n");
-    if let Some(r) = rejected.filter(|s| !s.trim().is_empty()) {
-        block.push_str(&format!("**rejected:** {r}\n"));
-    }
-    if let Some(r) = risk.filter(|s| !s.trim().is_empty()) {
-        block.push_str(&format!("**risk:** {r}\n"));
-    }
-    let clean_tags: Vec<String> = tags
-        .into_iter()
-        .map(|t| t.trim().to_string())
-        .filter(|t| !t.is_empty())
-        .collect();
-    if !clean_tags.is_empty() {
-        block.push_str(&format!("**tags:** {}\n", clean_tags.join(", ")));
-    }
-    block.push('\n');
-
+    let date = today();
+    let block = render_entry_block(&RenderInput {
+        date: &date,
+        title: &title,
+        why: &why,
+        rejected: rejected.as_deref(),
+        risk: risk.as_deref(),
+        tags: &tags,
+    });
     atomic_append(&path, &block)?;
 
     println!("added: {date} — {title}");
@@ -237,83 +152,22 @@ fn add(
     Ok(())
 }
 
-/// One parsed entry. We keep the raw markdown around for printing, plus
-/// the structured bits we need for filtering/stats.
-struct Entry {
-    raw: String,
-    date: Option<String>,
-    tags: Vec<String>,
-}
-
-fn read_entries() -> Result<Vec<Entry>> {
-    ensure_exists()?;
-    let p = logbook_path();
-    let text = fs::read_to_string(&p).with_context(|| format!("failed to read {}", p.display()))?;
-    let mut entries: Vec<Entry> = Vec::new();
-    let mut current: Vec<&str> = Vec::new();
-
-    for line in text.lines() {
-        if line.starts_with("## ") {
-            if !current.is_empty() {
-                entries.push(make_entry(&current));
-                current.clear();
-            }
-            current.push(line);
-        } else if !current.is_empty() {
-            current.push(line);
-        }
-    }
-    if !current.is_empty() {
-        entries.push(make_entry(&current));
-    }
-    Ok(entries)
-}
-
-fn make_entry(lines: &[&str]) -> Entry {
-    let mut raw = lines.join("\n");
-    while raw.ends_with('\n') || raw.ends_with(' ') {
-        raw.pop();
-    }
-    let header = lines.first().copied().unwrap_or("");
-    let date = header
-        .strip_prefix("## ")
-        .and_then(|s| s.split_whitespace().next())
-        .filter(|d| is_date_shaped(d))
-        .map(|d| d.to_string());
-
-    let mut tags: Vec<String> = Vec::new();
-    for line in lines {
-        if let Some(rest) = line.strip_prefix("**tags:**") {
-            tags = rest
-                .split(',')
-                .map(|t| t.trim().to_string())
-                .filter(|t| !t.is_empty())
-                .collect();
-            break;
-        }
-    }
-
-    Entry { raw, date, tags }
-}
-
-fn is_date_shaped(s: &str) -> bool {
-    s.len() == 10
-        && s.chars().filter(|c| *c == '-').count() == 2
-        && s.chars().filter(|c| c.is_ascii_digit() || *c == '-').count() == s.len()
-}
-
-fn validate_date_arg(name: &str, value: &str) -> Result<()> {
+fn validate_date_arg(flag: &str, value: &str) -> Result<()> {
     if !is_date_shaped(value) {
-        bail!("--{name} must be YYYY-MM-DD (got: \"{value}\")");
+        return Err(Error::BadDate {
+            flag: flag.to_string(),
+            value: value.to_string(),
+        });
     }
     Ok(())
 }
 
-fn list(
-    tag_filter: Option<&str>,
-    since: Option<&str>,
-    until: Option<&str>,
-) -> Result<()> {
+fn load_entries() -> Result<Vec<Entry>> {
+    let text = read_text(&logbook_path())?;
+    Ok(parse_entries(&text))
+}
+
+fn list(tag_filter: Option<&str>, since: Option<&str>, until: Option<&str>) -> Result<()> {
     if let Some(s) = since {
         validate_date_arg("since", s)?;
     }
@@ -321,7 +175,7 @@ fn list(
         validate_date_arg("until", u)?;
     }
 
-    let entries = read_entries()?;
+    let entries = load_entries()?;
     if entries.is_empty() {
         println!("(no entries yet)");
         return Ok(());
@@ -356,7 +210,7 @@ fn list(
 }
 
 fn search(term: &str) -> Result<()> {
-    let entries = read_entries()?;
+    let entries = load_entries()?;
     let needle = term.to_lowercase();
     let mut hits = 0;
     for entry in entries.iter().rev() {
@@ -372,7 +226,7 @@ fn search(term: &str) -> Result<()> {
 }
 
 fn last() -> Result<()> {
-    let entries = read_entries()?;
+    let entries = load_entries()?;
     match entries.last() {
         Some(e) => println!("{}", e.raw),
         None => println!("(no entries yet)"),
@@ -382,7 +236,7 @@ fn last() -> Result<()> {
 
 fn show(date: &str) -> Result<()> {
     validate_date_arg("date", date)?;
-    let entries = read_entries()?;
+    let entries = load_entries()?;
     let mut hits = 0;
     for entry in entries.iter() {
         if entry.date.as_deref() == Some(date) {
@@ -397,7 +251,7 @@ fn show(date: &str) -> Result<()> {
 }
 
 fn tags_cmd() -> Result<()> {
-    let entries = read_entries()?;
+    let entries = load_entries()?;
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
     for entry in &entries {
         for t in &entry.tags {
@@ -418,7 +272,7 @@ fn tags_cmd() -> Result<()> {
 }
 
 fn stats() -> Result<()> {
-    let entries = read_entries()?;
+    let entries = load_entries()?;
     let total = entries.len();
     if total == 0 {
         println!("(no entries yet)");
@@ -426,8 +280,8 @@ fn stats() -> Result<()> {
     }
     let dates: Vec<&str> = entries.iter().filter_map(|e| e.date.as_deref()).collect();
     let first = dates.iter().min().copied().unwrap_or("?");
-    let last = dates.iter().max().copied().unwrap_or("?");
-    let this_month_prefix = Local::now().format("%Y-%m").to_string();
+    let last_date = dates.iter().max().copied().unwrap_or("?");
+    let this_month_prefix = chrono::Local::now().format("%Y-%m").to_string();
     let this_month = dates
         .iter()
         .filter(|d| d.starts_with(&this_month_prefix))
@@ -443,7 +297,7 @@ fn stats() -> Result<()> {
     };
 
     println!("total entries: {total}");
-    println!("date range:    {first} → {last}");
+    println!("date range:    {first} → {last_date}");
     println!("this month:    {this_month}");
     println!("unique tags:   {unique_tags}");
     Ok(())
@@ -455,6 +309,7 @@ fn print_where() -> Result<()> {
     println!("{}", abs.display());
     if !p.exists() {
         eprintln!("(file does not exist yet — run `logbook init`)");
+        eprintln!("(env var: {ENV_VAR})");
     }
     Ok(())
 }
@@ -464,9 +319,9 @@ fn git_add(path: &Path) -> Result<()> {
         .arg("add")
         .arg(path)
         .status()
-        .context("failed to run git add — is git installed and is this a git repo?")?;
+        .map_err(|e| Error::Git(format!("failed to spawn git add: {e}")))?;
     if !status.success() {
-        bail!("git add exited with status {status}");
+        return Err(Error::Git(format!("git add exited with status {status}")));
     }
     Ok(())
 }
