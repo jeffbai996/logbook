@@ -29,3 +29,9 @@ Newest entries at the bottom. Generated and maintained by `logbook` — https://
 **risk:** atomic_append reads the whole file into memory before writing — fine for <10MB logbooks, becomes a problem in the millions-of-entries case but that's not the target user. tmp file lives next to logbook.md briefly during write — if the dir is read-only this fails loudly which is the correct behavior
 **tags:** features, robustness
 
+## 2026-05-16 — 0.1.0 — tests, typed errors, lib/bin split, CI
+**why:** first version meant to be depended on: 22 unit + 19 integration tests pin every visible behavior; typed Error enum lets future callers match on failure modes instead of grepping anyhow messages; lib/bin split lets the suite test the parser + store directly without shelling out; CI on three OSes catches windows/macos regressions early. semver-spirit: 0.0.x = 'i'm exploring', 0.1.0 = 'i trust this enough to recommend'
+**rejected:** 0.0.4 (would have been feature-creep without proof the existing surface is solid — wrong order); proptest round-trip generators (overkill for the 200-line parser, deferred to maybe-someday); separate crate for the library (no second binary planned, single-crate keeps install simple)
+**risk:** no published crates.io release means cargo install logbook still doesn't work for users — that's 0.2.0. README docs the source build workflow as the official path until then. CI burns ~3 minutes per push but parallelizes well so it's not blocking
+**tags:** release, tests, ci
+
