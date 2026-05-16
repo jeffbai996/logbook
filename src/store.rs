@@ -23,7 +23,10 @@ pub struct RenderInput<'a> {
 /// Render a single entry block, ending with a trailing blank line so
 /// subsequent entries don't run together.
 pub fn render_entry_block(input: &RenderInput<'_>) -> String {
-    let mut out = format!("## {} — {}\n**why:** {}\n", input.date, input.title, input.why);
+    let mut out = format!(
+        "## {} — {}\n**why:** {}\n",
+        input.date, input.title, input.why
+    );
     if let Some(r) = input.rejected.filter(|s| !s.trim().is_empty()) {
         out.push_str(&format!("**rejected:** {r}\n"));
     }
@@ -119,7 +122,14 @@ mod tests {
         risk: Option<&'a str>,
         tags: &'a [String],
     ) -> RenderInput<'a> {
-        RenderInput { date, title, why, rejected, risk, tags }
+        RenderInput {
+            date,
+            title,
+            why,
+            rejected,
+            risk,
+            tags,
+        }
     }
 
     #[test]
@@ -132,29 +142,16 @@ mod tests {
     #[test]
     fn renders_full_entry_in_canonical_order() {
         let tags = vec!["a".into(), "b".into()];
-        let out = render_entry_block(&ri(
-            "2026-05-16",
-            "t",
-            "w",
-            Some("rej"),
-            Some("rsk"),
-            &tags,
-        ));
-        let expected = "## 2026-05-16 — t\n**why:** w\n**rejected:** rej\n**risk:** rsk\n**tags:** a, b\n\n";
+        let out = render_entry_block(&ri("2026-05-16", "t", "w", Some("rej"), Some("rsk"), &tags));
+        let expected =
+            "## 2026-05-16 — t\n**why:** w\n**rejected:** rej\n**risk:** rsk\n**tags:** a, b\n\n";
         assert_eq!(out, expected);
     }
 
     #[test]
     fn omits_empty_optional_fields() {
         let tags: Vec<String> = vec![];
-        let out = render_entry_block(&ri(
-            "2026-05-16",
-            "t",
-            "w",
-            Some("   "),
-            Some(""),
-            &tags,
-        ));
+        let out = render_entry_block(&ri("2026-05-16", "t", "w", Some("   "), Some(""), &tags));
         // Whitespace-only rejected/risk should be dropped, not rendered as blank lines.
         assert_eq!(out, "## 2026-05-16 — t\n**why:** w\n\n");
     }
@@ -207,6 +204,9 @@ mod tests {
 
         // No "logbook.md.tmp" lingering after a successful rename.
         let tmp = dir.path().join("logbook.md.tmp");
-        assert!(!tmp.exists(), "tempfile should be renamed away, not left behind");
+        assert!(
+            !tmp.exists(),
+            "tempfile should be renamed away, not left behind"
+        );
     }
 }

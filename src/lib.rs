@@ -8,7 +8,7 @@ pub mod parse;
 pub mod store;
 
 pub use error::{Error, Result};
-pub use parse::{Entry, parse_entries};
+pub use parse::{parse_entries, Entry};
 pub use store::{atomic_append, init_file, read_text, render_entry_block, RenderInput};
 
 use chrono::Local;

@@ -16,7 +16,9 @@ struct Sandbox {
 
 impl Sandbox {
     fn new() -> Self {
-        Sandbox { dir: TempDir::new().unwrap() }
+        Sandbox {
+            dir: TempDir::new().unwrap(),
+        }
     }
 
     fn path(&self) -> PathBuf {
@@ -92,7 +94,9 @@ fn add_supports_multiple_tag_flags() {
     let sb = Sandbox::new();
     sb.cmd().arg("init").assert().success();
     sb.cmd()
-        .args(["add", "t", "--why", "w", "--tag", "refactor", "--tag", "perf"])
+        .args([
+            "add", "t", "--why", "w", "--tag", "refactor", "--tag", "perf",
+        ])
         .assert()
         .success();
 
@@ -104,11 +108,29 @@ fn add_supports_multiple_tag_flags() {
 fn list_returns_entries_newest_first() {
     let sb = Sandbox::new();
     sb.cmd().arg("init").assert().success();
-    sb.cmd().args(["add", "first", "--why", "a"]).assert().success();
-    sb.cmd().args(["add", "second", "--why", "b"]).assert().success();
-    sb.cmd().args(["add", "third", "--why", "c"]).assert().success();
+    sb.cmd()
+        .args(["add", "first", "--why", "a"])
+        .assert()
+        .success();
+    sb.cmd()
+        .args(["add", "second", "--why", "b"])
+        .assert()
+        .success();
+    sb.cmd()
+        .args(["add", "third", "--why", "c"])
+        .assert()
+        .success();
 
-    let stdout = String::from_utf8(sb.cmd().arg("list").assert().success().get_output().stdout.clone()).unwrap();
+    let stdout = String::from_utf8(
+        sb.cmd()
+            .arg("list")
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone(),
+    )
+    .unwrap();
     let third = stdout.find("third").expect("third entry present");
     let first = stdout.find("first").expect("first entry present");
     assert!(third < first, "newest entry should print before oldest");
@@ -118,8 +140,14 @@ fn list_returns_entries_newest_first() {
 fn list_with_tag_filters_to_matching_entries_only() {
     let sb = Sandbox::new();
     sb.cmd().arg("init").assert().success();
-    sb.cmd().args(["add", "tagged", "--why", "w", "--tag", "db"]).assert().success();
-    sb.cmd().args(["add", "untagged", "--why", "w"]).assert().success();
+    sb.cmd()
+        .args(["add", "tagged", "--why", "w", "--tag", "db"])
+        .assert()
+        .success();
+    sb.cmd()
+        .args(["add", "untagged", "--why", "w"])
+        .assert()
+        .success();
 
     sb.cmd()
         .args(["list", "--tag", "db"])
@@ -133,7 +161,10 @@ fn list_with_tag_filters_to_matching_entries_only() {
 fn list_with_unknown_tag_emits_no_match_message() {
     let sb = Sandbox::new();
     sb.cmd().arg("init").assert().success();
-    sb.cmd().args(["add", "t", "--why", "w", "--tag", "real"]).assert().success();
+    sb.cmd()
+        .args(["add", "t", "--why", "w", "--tag", "real"])
+        .assert()
+        .success();
 
     sb.cmd()
         .args(["list", "--tag", "missing"])
@@ -157,7 +188,10 @@ fn list_bad_since_returns_error_and_nonzero_exit() {
 fn search_is_case_insensitive() {
     let sb = Sandbox::new();
     sb.cmd().arg("init").assert().success();
-    sb.cmd().args(["add", "WEBSOCKET MIGRATION", "--why", "w"]).assert().success();
+    sb.cmd()
+        .args(["add", "WEBSOCKET MIGRATION", "--why", "w"])
+        .assert()
+        .success();
 
     sb.cmd()
         .args(["search", "websocket"])
@@ -182,8 +216,14 @@ fn search_with_no_hits_says_so() {
 fn last_returns_most_recent_entry_only() {
     let sb = Sandbox::new();
     sb.cmd().arg("init").assert().success();
-    sb.cmd().args(["add", "first", "--why", "a"]).assert().success();
-    sb.cmd().args(["add", "newest", "--why", "b"]).assert().success();
+    sb.cmd()
+        .args(["add", "first", "--why", "a"])
+        .assert()
+        .success();
+    sb.cmd()
+        .args(["add", "newest", "--why", "b"])
+        .assert()
+        .success();
 
     sb.cmd()
         .arg("last")
@@ -220,22 +260,49 @@ fn show_with_no_matches_returns_friendly_message() {
 fn tags_lists_in_descending_count_order() {
     let sb = Sandbox::new();
     sb.cmd().arg("init").assert().success();
-    sb.cmd().args(["add", "a", "--why", "w", "--tag", "refactor"]).assert().success();
-    sb.cmd().args(["add", "b", "--why", "w", "--tag", "refactor"]).assert().success();
-    sb.cmd().args(["add", "c", "--why", "w", "--tag", "perf"]).assert().success();
+    sb.cmd()
+        .args(["add", "a", "--why", "w", "--tag", "refactor"])
+        .assert()
+        .success();
+    sb.cmd()
+        .args(["add", "b", "--why", "w", "--tag", "refactor"])
+        .assert()
+        .success();
+    sb.cmd()
+        .args(["add", "c", "--why", "w", "--tag", "perf"])
+        .assert()
+        .success();
 
-    let out = String::from_utf8(sb.cmd().arg("tags").assert().success().get_output().stdout.clone()).unwrap();
+    let out = String::from_utf8(
+        sb.cmd()
+            .arg("tags")
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone(),
+    )
+    .unwrap();
     let refactor_pos = out.find("refactor").expect("refactor present");
     let perf_pos = out.find("perf").expect("perf present");
-    assert!(refactor_pos < perf_pos, "higher-count tag should print first");
+    assert!(
+        refactor_pos < perf_pos,
+        "higher-count tag should print first"
+    );
 }
 
 #[test]
 fn stats_reports_counts_after_adds() {
     let sb = Sandbox::new();
     sb.cmd().arg("init").assert().success();
-    sb.cmd().args(["add", "a", "--why", "w", "--tag", "x"]).assert().success();
-    sb.cmd().args(["add", "b", "--why", "w", "--tag", "y"]).assert().success();
+    sb.cmd()
+        .args(["add", "a", "--why", "w", "--tag", "x"])
+        .assert()
+        .success();
+    sb.cmd()
+        .args(["add", "b", "--why", "w", "--tag", "y"])
+        .assert()
+        .success();
 
     sb.cmd()
         .arg("stats")
@@ -254,7 +321,9 @@ fn where_prints_resolved_path() {
         .arg("where")
         .assert()
         .success()
-        .stdout(predicate::str::contains(expected.to_string_lossy().into_owned()));
+        .stdout(predicate::str::contains(
+            expected.to_string_lossy().into_owned(),
+        ));
 }
 
 #[test]
@@ -276,11 +345,16 @@ fn add_then_read_round_trip_preserves_all_fields() {
         .args([
             "add",
             "round-trip",
-            "--why", "preserve all fields",
-            "--rejected", "alternatives we said no to",
-            "--risk", "the thing that might break",
-            "--tag", "test",
-            "--tag", "integration",
+            "--why",
+            "preserve all fields",
+            "--rejected",
+            "alternatives we said no to",
+            "--risk",
+            "the thing that might break",
+            "--tag",
+            "test",
+            "--tag",
+            "integration",
         ])
         .assert()
         .success();
