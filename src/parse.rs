@@ -1,20 +1,60 @@
-//! Parser for the logbook markdown format. Entries are blocks starting with
-//! `## ` headers; lines before the first header (e.g. the file header
-//! written by `init`) are ignored.
+//! Parser for the logbook markdown format.
+//!
+//! Entries are blocks starting with `## ` headers; lines before the first
+//! header (e.g. the file header written by `init`) are treated as preamble
+//! and discarded. Within an entry, only two pieces of structure are
+//! extracted: the date in the heading (if it's shaped like `YYYY-MM-DD`)
+//! and the comma-separated values of the first `**tags:**` line. The full
+//! block is preserved verbatim in [`Entry::raw`] so subcommands like
+//! `list` and `search` can echo the original markdown back to stdout
+//! without re-rendering.
 
-/// A single parsed entry. `raw` is the markdown block as written, with
-/// trailing whitespace trimmed; `date` and `tags` are extracted for
-/// filtering and statistics.
+/// A single parsed entry from a logbook file.
+///
+/// `raw` is the markdown block as written, trailing whitespace trimmed,
+/// for re-emission. `date` and `tags` are extracted for filtering and
+/// statistics; they may be empty/None on malformed input.
+///
+/// # Example
+///
+/// ```
+/// use logbook::parse_entries;
+///
+/// let entries = parse_entries("## 2026-05-16 — t\n**why:** w\n**tags:** a, b\n");
+/// assert_eq!(entries[0].date.as_deref(), Some("2026-05-16"));
+/// assert_eq!(entries[0].tags, vec!["a", "b"]);
+/// assert!(entries[0].raw.contains("**why:** w"));
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {
+    /// The full markdown block as written, trailing whitespace trimmed.
     pub raw: String,
+    /// The `YYYY-MM-DD` date from the heading, or `None` if the heading
+    /// didn't begin with a shape-valid date.
     pub date: Option<String>,
+    /// Tags from the first `**tags:**` line within the entry, with
+    /// per-tag whitespace trimmed and empty entries dropped. May be empty.
     pub tags: Vec<String>,
 }
 
 /// Parse the full text of a logbook file into entries, in document order.
-/// Entries are detected by `## ` headers at the start of a line; any text
+///
+/// Entries are detected by `## ` headers at the start of a line. Any text
 /// before the first header is treated as the file preamble and discarded.
+/// Never panics, never errors — invalid markdown simply produces fewer
+/// or no entries.
+///
+/// # Example
+///
+/// ```
+/// use logbook::parse_entries;
+///
+/// let text = "# logbook\n\nPreamble.\n\n## 2026-05-15 — a\n**why:** first\n\n## 2026-05-16 — b\n**why:** second\n";
+/// let entries = parse_entries(text);
+/// assert_eq!(entries.len(), 2);
+/// assert_eq!(entries[0].date.as_deref(), Some("2026-05-15"));
+/// assert_eq!(entries[1].date.as_deref(), Some("2026-05-16"));
+/// ```
 pub fn parse_entries(text: &str) -> Vec<Entry> {
     let mut entries: Vec<Entry> = Vec::new();
     let mut current: Vec<&str> = Vec::new();
