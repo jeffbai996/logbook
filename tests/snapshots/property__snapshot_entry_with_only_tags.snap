@@ -1,0 +1,7 @@
+---
+source: tests/property.rs
+expression: block
+---
+## 2026-05-16 — tag-only example
+**why:** verify tags render without rejected/risk
+**tags:** tag-only

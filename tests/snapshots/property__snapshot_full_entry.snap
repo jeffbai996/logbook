@@ -1,0 +1,9 @@
+---
+source: tests/property.rs
+expression: block
+---
+## 2026-05-16 — switched ORM to raw SQL for the hot path
+**why:** ORM was generating 14-join queries for 3-table lookups; perf tanked under load
+**rejected:** ORM query hints (still magic), custom resolver (too much code for too little win)
+**risk:** lose automatic migrations — added manual scripts in db/migrations/ to compensate
+**tags:** db, infra, v1
