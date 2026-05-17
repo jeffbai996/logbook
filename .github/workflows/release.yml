@@ -1,0 +1,77 @@
+name: release
+
+# Builds prebuilt binaries for every tagged release and attaches them to
+# the GitHub Release. Users without a Rust toolchain can then download
+# the right archive from the Releases page and drop the binary on $PATH.
+#
+# Trigger: push of a tag matching v*.*.*
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write   # needed by softprops/action-gh-release to attach files
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,  target: x86_64-unknown-linux-gnu,    archive: tar.gz }
+          - { os: ubuntu-latest,  target: aarch64-unknown-linux-gnu,   archive: tar.gz, cross: true }
+          - { os: macos-latest,   target: x86_64-apple-darwin,         archive: tar.gz }
+          - { os: macos-latest,   target: aarch64-apple-darwin,        archive: tar.gz }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc,      archive: zip   }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust + target
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup target add ${{ matrix.target }}
+
+      - name: Install cross-compiler (aarch64 linux only)
+        if: matrix.cross == true
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build release binary
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Stage artifact
+        shell: bash
+        run: |
+          mkdir -p staging
+          VERSION="${GITHUB_REF_NAME#v}"
+          STEM="logbook-${VERSION}-${{ matrix.target }}"
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            cp "target/${{ matrix.target }}/release/logbook.exe" "staging/"
+            cp README.md LICENSE "staging/"
+            (cd staging && 7z a "../${STEM}.zip" .)
+            echo "ASSET=${STEM}.zip" >> "$GITHUB_ENV"
+          else
+            cp "target/${{ matrix.target }}/release/logbook" "staging/"
+            cp README.md LICENSE "staging/"
+            tar -czf "${STEM}.tar.gz" -C staging .
+            echo "ASSET=${STEM}.tar.gz" >> "$GITHUB_ENV"
+          fi
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.ASSET }}
+          generate_release_notes: true
+          draft: false
+          prerelease: false
