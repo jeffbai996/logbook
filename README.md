@@ -56,12 +56,23 @@ The fix is intentionally dumb: a single markdown file in the repo, committed in 
 
 ## Install
 
+**macOS / Linux (Homebrew):**
+
 ```bash
-# from crates.io (when published — see "Status" below)
+brew install jeffbai996/tap/logbook
+```
+
+**Any platform with Rust:**
+
+```bash
 cargo install logbook
 ```
 
-Or from source:
+**Prebuilt binary (no toolchain required):**
+
+Grab the archive for your platform from the [latest release](https://github.com/jeffbai996/logbook/releases/latest), extract it, and drop the binary on your `$PATH`. Prebuilt targets: `x86_64-linux`, `aarch64-linux`, `x86_64-macos`, `aarch64-macos` (Apple Silicon), `x86_64-windows`.
+
+**From source:**
 
 ```bash
 git clone https://github.com/jeffbai996/logbook.git
@@ -69,13 +80,11 @@ cd logbook
 cargo install --path .
 ```
 
-You'll need [Rust](https://rustup.rs) 1.75 or newer. Installing rustup takes about 30 seconds; it installs into `~/.cargo/` and `~/.rustup/` with no sudo.
-
-After installing, `logbook` is on your PATH:
+Requires [Rust](https://rustup.rs) 1.75 or newer. After installing, `logbook` is on your `$PATH`:
 
 ```bash
 $ logbook --version
-logbook 0.1.1
+logbook 0.2.0
 ```
 
 ## Quickstart
@@ -241,7 +250,7 @@ A push is only green when all three OSes build, all 56 tests pass, the code is r
 
 ## Roadmap
 
-**0.1.x — testing & polish** ✅ *current*
+**0.1.x — testing & polish** ✅
 - ~~Test suite~~ ✅ 56 tests across 4 categories
 - ~~Better error messages~~ ✅ typed `Error` enum
 - ~~Atomic writes~~ ✅ shipped in 0.0.3
@@ -250,10 +259,10 @@ A push is only green when all three OSes build, all 56 tests pass, the code is r
 - ~~Property + snapshot tests~~ ✅ shipped in 0.1.1
 - ~~Full rustdoc coverage~~ ✅ shipped in 0.1.1
 
-**0.2.0 — distribution**
-- Publish to crates.io so `cargo install logbook` works
-- Prebuilt binaries via GitHub Releases for macOS, Linux, Windows (no Rust toolchain required to install)
-- Homebrew tap
+**0.2.x — distribution** ✅ *current*
+- ~~Publish to crates.io so `cargo install logbook` works~~ ✅ shipped in 0.2.0
+- ~~Prebuilt binaries via GitHub Releases for macOS, Linux, Windows~~ ✅ shipped in 0.2.0 (5 targets)
+- ~~Homebrew tap~~ ✅ shipped in 0.2.0 (`brew install jeffbai996/tap/logbook`)
 
 **0.3.0 — ergonomics**
 - `logbook add` opens `$EDITOR` when `--why` is omitted (git-commit style)
