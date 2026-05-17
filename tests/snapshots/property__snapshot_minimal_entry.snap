@@ -1,0 +1,6 @@
+---
+source: tests/property.rs
+expression: block
+---
+## 2026-05-16 — use SQLite over Postgres for v1
+**why:** single binary, no external service, fine for <100 concurrent writes
