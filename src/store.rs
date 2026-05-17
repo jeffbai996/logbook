@@ -1,6 +1,10 @@
-//! File I/O for the logbook. Renders new entry blocks and writes them
-//! atomically by staging to a sibling tempfile and renaming on top of the
-//! target, so a crashed run cannot leave a half-written entry behind.
+//! File I/O for the logbook.
+//!
+//! Renders new entry blocks via [`render_entry_block`] and writes them
+//! atomically via [`atomic_append`]: stage to a sibling tempfile, then
+//! `rename()` on top of the target. The rename is atomic on POSIX and on
+//! NTFS (via `ReplaceFile`), so a crashed run cannot leave a half-written
+//! entry behind.
 
 use crate::error::{Error, Result};
 use crate::HEADER;
@@ -8,20 +12,56 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::Path;
 
-/// Inputs needed to render an entry block. Kept as a struct so the call
-/// site reads cleanly and future fields don't break callers.
+/// Inputs needed to render an entry block.
+///
+/// Kept as a borrow-everything struct so the call site reads cleanly and
+/// new optional fields can be added in future versions without breaking
+/// callers (they'd compile-error on the missing field and add `None`).
+///
+/// # Example
+///
+/// ```
+/// use logbook::{render_entry_block, RenderInput};
+///
+/// let tags = vec!["refactor".to_string()];
+/// let block = render_entry_block(&RenderInput {
+///     date: "2026-05-16",
+///     title: "switched ORM",
+///     why: "perf",
+///     rejected: None,
+///     risk: None,
+///     tags: &tags,
+/// });
+/// assert!(block.starts_with("## 2026-05-16 — switched ORM\n"));
+/// ```
 #[derive(Debug, Clone)]
 pub struct RenderInput<'a> {
+    /// Date string, conventionally `YYYY-MM-DD`. Not validated by the
+    /// renderer — pass [`crate::today`] if you want today's date.
     pub date: &'a str,
+    /// Short single-line title.
     pub title: &'a str,
+    /// The mandatory `why` field — the reason for the decision.
     pub why: &'a str,
+    /// Optional `rejected` field — alternatives considered and why not.
+    /// Empty or whitespace-only strings are omitted from the output.
     pub rejected: Option<&'a str>,
+    /// Optional `risk` field — what could go wrong.
+    /// Empty or whitespace-only strings are omitted from the output.
     pub risk: Option<&'a str>,
+    /// Tags to attach. Per-tag whitespace is trimmed and empty entries
+    /// are dropped before rendering. An empty slice omits the tags line.
     pub tags: &'a [String],
 }
 
-/// Render a single entry block, ending with a trailing blank line so
-/// subsequent entries don't run together.
+/// Render a single entry block as markdown.
+///
+/// Output ends with a trailing blank line so subsequent entries appended
+/// to the same file don't run together. Output is fully deterministic
+/// given the input; no global state is consulted.
+///
+/// Field order in the output is fixed: `## date — title`, then `**why:**`,
+/// then optionally `**rejected:**`, `**risk:**`, `**tags:**`.
 pub fn render_entry_block(input: &RenderInput<'_>) -> String {
     let mut out = format!(
         "## {} — {}\n**why:** {}\n",
@@ -47,7 +87,12 @@ pub fn render_entry_block(input: &RenderInput<'_>) -> String {
 }
 
 /// Create the logbook file with the header, if it doesn't already exist.
-/// Returns true if a new file was created, false if it already existed.
+///
+/// Returns `Ok(true)` if a new file was created, `Ok(false)` if the file
+/// already existed (in which case it is left untouched). The header is
+/// the constant [`crate::HEADER`].
+///
+/// Idempotent — safe to call on every `add` to auto-initialize.
 pub fn init_file(path: &Path) -> Result<bool> {
     if path.exists() {
         return Ok(false);
@@ -56,8 +101,11 @@ pub fn init_file(path: &Path) -> Result<bool> {
     Ok(true)
 }
 
-/// Read the full contents of a logbook file, returning `NotFound` if the
-/// file does not exist.
+/// Read the full text of a logbook file.
+///
+/// Returns [`Error::NotFound`] if the file doesn't exist (so callers can
+/// match on it and offer a friendly "run init first" hint). Wraps any
+/// other I/O failure as [`Error::Io`].
 pub fn read_text(path: &Path) -> Result<String> {
     if !path.exists() {
         return Err(Error::NotFound {
@@ -67,13 +115,22 @@ pub fn read_text(path: &Path) -> Result<String> {
     fs::read_to_string(path).map_err(|e| Error::io("read", path, e))
 }
 
-/// Append `block` to `path` atomically: stage to a sibling tempfile,
-/// then `rename()` on top of the original. The rename is atomic on POSIX
-/// and on NTFS (via `ReplaceFile`), so a crashed write cannot corrupt
-/// the existing file.
+/// Append `block` to `path` atomically.
 ///
-/// Caller is responsible for ensuring `path` exists (call `init_file`
-/// first); we don't auto-init from the library layer.
+/// The implementation stages to a sibling tempfile, then `rename()`s on
+/// top of the original. POSIX `rename(2)` and Windows `MoveFileEx`/
+/// `ReplaceFile` are both atomic at the filesystem level — a crashed
+/// run, power loss, or `kill -9` mid-write cannot leave the file in a
+/// partially-overwritten state. Either the new content is fully visible
+/// or the old content is, never a mix.
+///
+/// If `path` does not yet exist, this still works (no existing content
+/// to preserve, so the tempfile starts empty before appending `block`).
+/// Callers wanting the standard header should call [`init_file`] first.
+///
+/// The tempfile lives next to `path` (same parent directory) so the
+/// rename stays on one filesystem — cross-filesystem renames would
+/// fail with `EXDEV`.
 pub fn atomic_append(path: &Path, block: &str) -> Result<()> {
     let existing = if path.exists() {
         fs::read(path).map_err(|e| Error::io("read", path, e))?
