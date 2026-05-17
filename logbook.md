@@ -35,3 +35,9 @@ Newest entries at the bottom. Generated and maintained by `logbook` — https://
 **risk:** no published crates.io release means cargo install logbook still doesn't work for users — that's 0.2.0. README docs the source build workflow as the official path until then. CI burns ~3 minutes per push but parallelizes well so it's not blocking
 **tags:** release, tests, ci
 
+## 2026-05-16 — 0.1.1 — proof and polish patch: property/snapshot tests, full rustdoc, public-first README
+**why:** patch release discipline: no new user-visible features (those are 0.2.x), only proof that what's built actually works and docs that a stranger can use. proptest round-trip catches whole classes of bugs unit tests miss (renderer/parser drift); insta snapshots pin canonical output so silent format changes fail CI; rustdoc on every public item means crates.io and IDE hover-help aren't empty; README rewrite assumes zero prior context — leads with a working example, includes ToC, FAQ, comparison-to-alternatives table
+**rejected:** new commands (would be feature creep, breaks semver-patch contract); colored output (deferred to 0.3.0 as planned); changing the on-disk format (would break round-trip property tests by definition)
+**risk:** the proptest 'parser never panics' guarantee is only as strong as the input regex — we don't yet feed it true random bytes via arbtest or AFL; that's fine for a 200-line parser but worth knowing if the format grows. snapshots are reviewed by humans so a careless 'cargo insta accept' could mask a real regression
+**tags:** release, tests, docs
+
