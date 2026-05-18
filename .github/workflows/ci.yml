@@ -18,7 +18,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install stable toolchain
         run: rustup toolchain install stable --profile minimal --no-self-update
       - uses: Swatinem/rust-cache@v2
@@ -31,7 +31,7 @@ jobs:
     name: lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install stable toolchain with rustfmt + clippy
         run: |
           rustup toolchain install stable --profile minimal --component rustfmt,clippy --no-self-update
