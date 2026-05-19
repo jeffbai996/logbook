@@ -22,6 +22,7 @@ jobs:
       matrix:
         include:
           - { os: ubuntu-latest,  target: x86_64-unknown-linux-gnu,    archive: tar.gz }
+          - { os: ubuntu-latest,  target: x86_64-unknown-linux-musl,   archive: tar.gz, musl: true }
           - { os: ubuntu-latest,  target: aarch64-unknown-linux-gnu,   archive: tar.gz, cross: true }
           - { os: macos-latest,   target: x86_64-apple-darwin,         archive: tar.gz }
           - { os: macos-latest,   target: aarch64-apple-darwin,        archive: tar.gz }
@@ -40,6 +41,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Install musl tools (musl target only)
+        if: matrix.musl == true
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
 
       - uses: Swatinem/rust-cache@v2
         with:
