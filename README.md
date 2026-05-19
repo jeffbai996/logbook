@@ -1,5 +1,7 @@
 # logbook
 
+[![crates.io](https://img.shields.io/crates/v/logbook.svg)](https://crates.io/crates/logbook)
+[![docs.rs](https://docs.rs/logbook/badge.svg)](https://docs.rs/logbook)
 [![CI](https://github.com/jeffbai996/logbook/actions/workflows/ci.yml/badge.svg)](https://github.com/jeffbai996/logbook/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust 1.75+](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
