@@ -72,7 +72,7 @@ cargo install logbook
 
 **Prebuilt binary (no toolchain required):**
 
-Grab the archive for your platform from the [latest release](https://github.com/jeffbai996/logbook/releases/latest), extract it, and drop the binary on your `$PATH`. Prebuilt targets: `x86_64-linux`, `aarch64-linux`, `x86_64-macos`, `aarch64-macos` (Apple Silicon), `x86_64-windows`.
+Grab the archive for your platform from the [latest release](https://github.com/jeffbai996/logbook/releases/latest), extract it, and drop the binary on your `$PATH`. Prebuilt targets: `x86_64-linux` (glibc), `x86_64-linux-musl` (static — Alpine, scratch containers), `aarch64-linux`, `x86_64-macos`, `aarch64-macos` (Apple Silicon), `x86_64-windows`.
 
 **From source:**
 
@@ -86,7 +86,7 @@ Requires [Rust](https://rustup.rs) 1.75 or newer. After installing, `logbook` is
 
 ```bash
 $ logbook --version
-logbook 0.2.0
+logbook 0.2.1
 ```
 
 ## Quickstart
@@ -265,6 +265,8 @@ A push is only green when all three OSes build, all 56 tests pass, the code is r
 - ~~Publish to crates.io so `cargo install logbook` works~~ ✅ shipped in 0.2.0
 - ~~Prebuilt binaries via GitHub Releases for macOS, Linux, Windows~~ ✅ shipped in 0.2.0 (5 targets)
 - ~~Homebrew tap~~ ✅ shipped in 0.2.0 (`brew install jeffbai996/tap/logbook`)
+- ~~Static `x86_64-linux-musl` binary for Alpine / scratch containers~~ ✅ shipped in 0.2.1
+- ~~`CHANGELOG.md` + crates.io / docs.rs badges~~ ✅ shipped in 0.2.1
 
 **0.3.0 — ergonomics**
 - `logbook add` opens `$EDITOR` when `--why` is omitted (git-commit style)
