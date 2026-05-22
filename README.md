@@ -283,4 +283,4 @@ A push is only green when all three OSes build, all 56 tests pass, the code is r
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE).
