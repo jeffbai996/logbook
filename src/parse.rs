@@ -32,6 +32,19 @@ pub struct Entry {
     /// The `YYYY-MM-DD` date from the heading, or `None` if the heading
     /// didn't begin with a shape-valid date.
     pub date: Option<String>,
+    /// The title from the heading — everything after `## <date> — `, or
+    /// the whole heading text if it didn't follow the `date — title` shape.
+    /// `None` only when the heading is empty.
+    pub title: Option<String>,
+    /// The `**why:**` field value, or `None` if absent.
+    pub why: Option<String>,
+    /// The `**rejected:**` field value, or `None` if absent.
+    pub rejected: Option<String>,
+    /// The `**risk:**` field value, or `None` if absent.
+    pub risk: Option<String>,
+    /// The `**supersedes:**` field value (a `YYYY-MM-DD` date this entry
+    /// replaces), or `None` if absent.
+    pub supersedes: Option<String>,
     /// Tags from the first `**tags:**` line within the entry, with
     /// per-tag whitespace trimmed and empty entries dropped. May be empty.
     pub tags: Vec<String>,
@@ -83,11 +96,31 @@ fn make_entry(lines: &[&str]) -> Entry {
     }
 
     let header = lines.first().copied().unwrap_or("");
-    let date = header
-        .strip_prefix("## ")
-        .and_then(|s| s.split_whitespace().next())
+    let heading_body = header.strip_prefix("## ").unwrap_or(header);
+    let date = heading_body
+        .split_whitespace()
+        .next()
         .filter(|d| crate::is_date_shaped(d))
         .map(|d| d.to_string());
+
+    // Title = heading minus the leading `<date> — `. If the heading didn't
+    // follow that shape, fall back to the whole heading body (so a malformed
+    // header still yields a usable title rather than None).
+    let title = if date.is_some() {
+        heading_body
+            .split_once(" — ")
+            .map(|(_, t)| t.trim().to_string())
+            .filter(|t| !t.is_empty())
+            .or_else(|| Some(heading_body.trim().to_string()))
+    } else {
+        let t = heading_body.trim();
+        (!t.is_empty()).then(|| t.to_string())
+    };
+
+    let why = first_field(lines, "**why:**");
+    let rejected = first_field(lines, "**rejected:**");
+    let risk = first_field(lines, "**risk:**");
+    let supersedes = first_field(lines, "**supersedes:**");
 
     let mut tags: Vec<String> = Vec::new();
     for line in lines {
@@ -101,7 +134,28 @@ fn make_entry(lines: &[&str]) -> Entry {
         }
     }
 
-    Entry { raw, date, tags }
+    Entry {
+        raw,
+        date,
+        title,
+        why,
+        rejected,
+        risk,
+        supersedes,
+        tags,
+    }
+}
+
+/// Return the trimmed value of the first line matching `prefix`
+/// (e.g. `"**why:**"`), or `None` if no such line or the value is empty.
+fn first_field(lines: &[&str], prefix: &str) -> Option<String> {
+    for line in lines {
+        if let Some(rest) = line.strip_prefix(prefix) {
+            let v = rest.trim();
+            return (!v.is_empty()).then(|| v.to_string());
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -192,6 +246,57 @@ mod tests {
         let entries = parse_entries(text);
         assert!(!entries[0].raw.ends_with('\n'));
         assert!(!entries[0].raw.ends_with(' '));
+    }
+
+    #[test]
+    fn extracts_title_why_rejected_risk() {
+        let text = "## 2026-05-16 — switched ORM\n**why:** perf\n**rejected:** redis\n**risk:** migrations\n**tags:** db\n";
+        let e = &parse_entries(text)[0];
+        assert_eq!(e.title.as_deref(), Some("switched ORM"));
+        assert_eq!(e.why.as_deref(), Some("perf"));
+        assert_eq!(e.rejected.as_deref(), Some("redis"));
+        assert_eq!(e.risk.as_deref(), Some("migrations"));
+    }
+
+    #[test]
+    fn absent_optional_fields_are_none() {
+        let text = "## 2026-05-16 — t\n**why:** w\n";
+        let e = &parse_entries(text)[0];
+        assert_eq!(e.why.as_deref(), Some("w"));
+        assert_eq!(e.rejected, None);
+        assert_eq!(e.risk, None);
+        assert_eq!(e.supersedes, None);
+    }
+
+    #[test]
+    fn extracts_supersedes_date() {
+        let text = "## 2026-05-16 — t\n**why:** w\n**supersedes:** 2026-05-01\n";
+        let e = &parse_entries(text)[0];
+        assert_eq!(e.supersedes.as_deref(), Some("2026-05-01"));
+    }
+
+    #[test]
+    fn title_with_em_dash_in_body_keeps_full_title() {
+        // The split is on the FIRST " — " (date separator); a title that itself
+        // contains " — " should keep everything after the first separator.
+        let text = "## 2026-05-16 — switched ORM — finally\n**why:** w\n";
+        let e = &parse_entries(text)[0];
+        assert_eq!(e.title.as_deref(), Some("switched ORM — finally"));
+    }
+
+    #[test]
+    fn malformed_header_title_falls_back_to_heading_text() {
+        let text = "## not-a-date wat\n**why:** w\n";
+        let e = &parse_entries(text)[0];
+        assert_eq!(e.date, None);
+        assert_eq!(e.title.as_deref(), Some("not-a-date wat"));
+    }
+
+    #[test]
+    fn empty_why_value_is_none() {
+        let text = "## 2026-05-16 — t\n**why:**   \n";
+        let e = &parse_entries(text)[0];
+        assert_eq!(e.why, None);
     }
 
     #[test]

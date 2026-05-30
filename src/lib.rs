@@ -28,6 +28,7 @@
 //!     rejected: Some("redis pub/sub (overkill)"),
 //!     risk: None,
 //!     tags: &["refactor".to_string(), "perf".to_string()],
+//!     supersedes: None,
 //! });
 //! atomic_append(path, &block)?;
 //! # Ok::<(), logbook::Error>(())
@@ -45,11 +46,16 @@
 //! assert_eq!(entries[0].tags, vec!["refactor", "perf"]);
 //! ```
 
+pub mod color;
+pub mod editor;
 pub mod error;
+pub mod export;
 pub mod parse;
 pub mod store;
 
+pub use color::{colorize_block, should_colorize, ColorChoice};
 pub use error::{Error, Result};
+pub use export::entries_to_json;
 pub use parse::{parse_entries, Entry};
 pub use store::{atomic_append, init_file, read_text, render_entry_block, RenderInput};
 

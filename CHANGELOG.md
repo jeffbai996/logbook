@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-29
+
+### Added
+- `logbook export --format json` — emit all entries as a structured JSON array (`date`, `title`, `why`, `rejected`, `risk`, `supersedes`, `tags`) for tooling integrations: indexing, ingesting into a memory store, or feeding an LLM agent a repo's decision history as data rather than raw markdown. Dependency-free encoder with RFC 8259 escaping.
+- `$EDITOR` integration — `logbook add "title"` with no `--why` now opens `$EDITOR` (falling back to `$VISUAL`) on a git-commit-style template; comment lines are stripped, an empty message aborts without writing.
+- `logbook supersede <old-date> "new title" --why …` — append a new entry that formally supersedes an earlier one, recording a `**supersedes:**` link. The target date must exist. Keeps a decision log truthful over time — superseded reasoning is visibly marked rather than silently stale.
+- Colored output — `--color <auto|always|never>` colorizes `list`/`last`/`show`/`search` (bold headers and field labels). `auto` colors only on a TTY; honors `NO_COLOR`. Piped output and `export` stay byte-for-byte uncolored.
+
+### Removed
+- Homebrew tap (`brew install jeffbai996/tap/logbook`) — retired for lack of an audience. `cargo install logbook` and the prebuilt GitHub-release binaries cover every platform.
+
 ## [0.2.1] - 2026-05-19
 
 ### Added
@@ -52,7 +63,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial prototype releases (0.0.1 → 0.0.3) — pre-public iterations of the CLI surface and `logbook.md` format.
 
-[Unreleased]: https://github.com/jeffbai996/logbook/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/jeffbai996/logbook/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/jeffbai996/logbook/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/jeffbai996/logbook/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/jeffbai996/logbook/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/jeffbai996/logbook/compare/v0.1.0...v0.1.1

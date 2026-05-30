@@ -58,12 +58,6 @@ The fix is intentionally dumb: a single markdown file in the repo, committed in 
 
 ## Install
 
-**macOS / Linux (Homebrew):**
-
-```bash
-brew install jeffbai996/tap/logbook
-```
-
 **Any platform with Rust:**
 
 ```bash
@@ -86,7 +80,7 @@ Requires [Rust](https://rustup.rs) 1.75 or newer. After installing, `logbook` is
 
 ```bash
 $ logbook --version
-logbook 0.2.1
+logbook 0.3.0
 ```
 
 ## Quickstart
@@ -114,14 +108,18 @@ That's it. Future entries are the same shape. The four common workflows:
 | Command | What it does |
 |---|---|
 | `logbook init` | Create the logbook file with a header. Idempotent. |
-| `logbook add <title> --why <reason> [--rejected …] [--risk …] [--tag X]… [--stage] [--print]` | Append a new entry. `--tag` is repeatable. `--stage` runs `git add`. `--print` echoes the rendered block. |
+| `logbook add <title> [--why <reason>] [--rejected …] [--risk …] [--tag X]… [--stage] [--print]` | Append a new entry. With no `--why`, opens `$EDITOR` to compose it. `--tag` is repeatable. `--stage` runs `git add`. `--print` echoes the rendered block. |
+| `logbook supersede <YYYY-MM-DD> <title> [--why …] [--rejected …] [--risk …] [--tag X]… [--stage]` | Append a new entry that formally supersedes the entry on the given date (which must exist), recording a `**supersedes:**` link. |
 | `logbook list [--tag X] [--since YYYY-MM-DD] [--until YYYY-MM-DD]` | Print entries newest-first with optional filters (all combinable). |
 | `logbook last` | Print the most recent entry only. |
 | `logbook show <YYYY-MM-DD>` | Print every entry from a specific date. |
 | `logbook search <term>` | Case-insensitive substring search across all entries. |
+| `logbook export [--format json]` | Emit all entries as structured data (JSON array) for tooling. |
 | `logbook tags` | List all distinct tags with usage counts. |
 | `logbook stats` | Total entries, date range, entries-this-month, unique tags. |
 | `logbook where` | Print the resolved logbook file path (honors `LOGBOOK_FILE`). |
+
+Global flag: `--color <auto\|always\|never>` controls colorized output for `list`/`last`/`show`/`search` (default `auto`: color only on a terminal, honoring `NO_COLOR`).
 
 Run `logbook --help` or `logbook <cmd> --help` for the full flag reference.
 
@@ -261,18 +259,18 @@ A push is only green when all three OSes build, all 56 tests pass, the code is r
 - ~~Property + snapshot tests~~ ✅ shipped in 0.1.1
 - ~~Full rustdoc coverage~~ ✅ shipped in 0.1.1
 
-**0.2.x — distribution** ✅ *current*
+**0.2.x — distribution** ✅
 - ~~Publish to crates.io so `cargo install logbook` works~~ ✅ shipped in 0.2.0
 - ~~Prebuilt binaries via GitHub Releases for macOS, Linux, Windows~~ ✅ shipped in 0.2.0 (5 targets)
-- ~~Homebrew tap~~ ✅ shipped in 0.2.0 (`brew install jeffbai996/tap/logbook`)
 - ~~Static `x86_64-linux-musl` binary for Alpine / scratch containers~~ ✅ shipped in 0.2.1
 - ~~`CHANGELOG.md` + crates.io / docs.rs badges~~ ✅ shipped in 0.2.1
+- Homebrew tap — dropped in 0.3.0 (no audience; `cargo install` and prebuilt binaries cover all platforms)
 
-**0.3.0 — ergonomics**
-- `logbook add` opens `$EDITOR` when `--why` is omitted (git-commit style)
-- `logbook supersede <old-date> "new title" --why ...` — formal supersession syntax linking the new entry to the old one
-- Colored TTY output (off when piped)
-- `logbook export --format json` for tooling integrations
+**0.3.0 — ergonomics** ✅ *current*
+- ~~`logbook add` opens `$EDITOR` when `--why` is omitted (git-commit style)~~ ✅
+- ~~`logbook supersede <old-date> "new title" --why ...` — formal supersession syntax linking the new entry to the old one~~ ✅
+- ~~Colored TTY output (off when piped)~~ ✅
+- ~~`logbook export --format json` for tooling integrations~~ ✅
 
 **Maybe-someday**
 - Shell completion (`logbook completions bash`)

@@ -69,6 +69,25 @@ pub enum Error {
     /// exited non-zero.
     #[error("git command failed: {0}")]
     Git(String),
+
+    /// Neither `$EDITOR` nor `$VISUAL` was set when `add` needed to open an
+    /// editor (because `--why` was omitted).
+    #[error("no editor configured — set $EDITOR or $VISUAL, or pass --why directly")]
+    NoEditor,
+
+    /// The `$EDITOR` subprocess failed to spawn or exited non-zero.
+    #[error("editor command failed: {0}")]
+    Editor(String),
+
+    /// The editor was opened but the user left the `why` field empty, so
+    /// there's nothing to record. Aborts without writing.
+    #[error("aborting: empty entry (no why text was provided)")]
+    EmptyEntry,
+
+    /// `supersede` was given a date that has no matching entry in the
+    /// logbook — you can't supersede a decision that was never recorded.
+    #[error("no entry dated {0} to supersede — check `logbook list` for valid dates")]
+    SupersedeTargetMissing(String),
 }
 
 /// Shorthand for `std::result::Result<T, logbook::Error>`.

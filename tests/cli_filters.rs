@@ -118,7 +118,9 @@ fn list_with_inverted_window_matches_nothing() {
         .args(["list", "--since", "2026-03-01", "--until", "2026-01-01"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("no entries match the given filters"));
+        .stdout(predicate::str::contains(
+            "no entries match the given filters",
+        ));
 }
 
 #[test]

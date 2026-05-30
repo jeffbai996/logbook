@@ -367,3 +367,292 @@ fn add_then_read_round_trip_preserves_all_fields() {
     assert!(body.contains("**risk:** the thing that might break"));
     assert!(body.contains("**tags:** test, integration"));
 }
+
+#[test]
+fn export_json_emits_valid_array() {
+    let sb = Sandbox::new();
+    sb.cmd()
+        .args([
+            "add",
+            "switched ORM",
+            "--why",
+            "perf",
+            "--rejected",
+            "redis",
+            "--risk",
+            "migrations",
+            "--tag",
+            "db",
+        ])
+        .assert()
+        .success();
+
+    let out = sb
+        .cmd()
+        .args(["export", "--format", "json"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    assert!(stdout.contains("\"date\": \"20"));
+    assert!(stdout.contains("\"title\": \"switched ORM\""));
+    assert!(stdout.contains("\"why\": \"perf\""));
+    assert!(stdout.contains("\"rejected\": \"redis\""));
+    assert!(stdout.contains("\"risk\": \"migrations\""));
+    assert!(stdout.contains("\"db\""));
+}
+
+#[test]
+fn export_defaults_to_json() {
+    let sb = Sandbox::new();
+    sb.cmd().args(["add", "t", "--why", "w"]).assert().success();
+    // No --format → JSON by default.
+    sb.cmd()
+        .arg("export")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"title\": \"t\""));
+}
+
+#[test]
+fn export_empty_logbook_is_empty_array() {
+    let sb = Sandbox::new();
+    sb.cmd().arg("init").assert().success();
+    sb.cmd()
+        .args(["export", "--format", "json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[]"));
+}
+
+#[test]
+fn export_unknown_format_errors() {
+    let sb = Sandbox::new();
+    sb.cmd().args(["add", "t", "--why", "w"]).assert().success();
+    sb.cmd()
+        .args(["export", "--format", "yaml"])
+        .assert()
+        .failure();
+}
+
+/// Write an executable fake-editor script that appends `body` to the file it's
+/// given as $1. spawn_editor splits the editor command on whitespace, so a bare
+/// script path (no args/quotes) is the portable way to fake an editor.
+#[cfg(unix)]
+fn fake_editor(dir: &std::path::Path, body: &str) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let p = dir.join("fake-editor.sh");
+    std::fs::write(&p, format!("#!/bin/sh\nprintf '{body}' >> \"$1\"\n")).unwrap();
+    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+    p
+}
+
+#[cfg(unix)]
+#[test]
+fn add_without_why_opens_editor_and_captures() {
+    let sb = Sandbox::new();
+    let editor = fake_editor(sb.dir.path(), "editor-supplied reason\\n");
+    sb.cmd()
+        .env("EDITOR", &editor)
+        .args(["add", "no-why-flag"])
+        .assert()
+        .success();
+
+    let body = std::fs::read_to_string(sb.path()).unwrap();
+    assert!(body.contains("— no-why-flag"));
+    assert!(body.contains("**why:** editor-supplied reason"));
+}
+
+#[test]
+fn add_without_why_and_empty_editor_aborts() {
+    let sb = Sandbox::new();
+    // Editor that writes nothing (only the comment template remains) → abort.
+    sb.cmd()
+        .env("EDITOR", "true")
+        .args(["add", "will-abort"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("empty entry"));
+
+    // Nothing should have been written.
+    assert!(
+        !sb.path().exists()
+            || !std::fs::read_to_string(sb.path())
+                .unwrap()
+                .contains("will-abort")
+    );
+}
+
+#[test]
+fn add_without_why_no_editor_configured_errors() {
+    let sb = Sandbox::new();
+    sb.cmd()
+        .env_remove("EDITOR")
+        .env_remove("VISUAL")
+        .args(["add", "no-editor"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no editor configured"));
+}
+
+#[test]
+fn add_with_why_flag_does_not_open_editor() {
+    let sb = Sandbox::new();
+    // EDITOR set to something that would FAIL if invoked — proves it isn't.
+    sb.cmd()
+        .env("EDITOR", "false")
+        .args(["add", "has-why", "--why", "explicit reason"])
+        .assert()
+        .success();
+    let body = std::fs::read_to_string(sb.path()).unwrap();
+    assert!(body.contains("**why:** explicit reason"));
+}
+
+#[test]
+fn supersede_appends_entry_linking_to_old_date() {
+    let sb = Sandbox::new();
+    // Seed an original decision.
+    sb.cmd()
+        .args(["add", "use ORM", "--why", "convenient"])
+        .assert()
+        .success();
+    let old_date = {
+        // Grab the date the original got (today, but read it from the file to be exact).
+        let body = std::fs::read_to_string(sb.path()).unwrap();
+        body.lines()
+            .find(|l| l.starts_with("## "))
+            .and_then(|l| l.strip_prefix("## "))
+            .and_then(|s| s.split_whitespace().next())
+            .unwrap()
+            .to_string()
+    };
+
+    sb.cmd()
+        .args([
+            "supersede",
+            &old_date,
+            "drop ORM for raw SQL",
+            "--why",
+            "ORM perf was bad",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(format!("supersedes {old_date}")));
+
+    let body = std::fs::read_to_string(sb.path()).unwrap();
+    assert!(body.contains("— drop ORM for raw SQL"));
+    assert!(body.contains(&format!("**supersedes:** {old_date}")));
+}
+
+#[test]
+fn supersede_missing_target_errors() {
+    let sb = Sandbox::new();
+    sb.cmd()
+        .args(["add", "something", "--why", "w"])
+        .assert()
+        .success();
+    sb.cmd()
+        .args(["supersede", "1999-01-01", "new", "--why", "w"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no entry dated 1999-01-01"));
+}
+
+#[test]
+fn supersede_malformed_date_errors() {
+    let sb = Sandbox::new();
+    sb.cmd().args(["add", "x", "--why", "w"]).assert().success();
+    sb.cmd()
+        .args(["supersede", "not-a-date", "new", "--why", "w"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("YYYY-MM-DD"));
+}
+
+#[test]
+fn supersede_appears_in_json_export() {
+    let sb = Sandbox::new();
+    sb.cmd()
+        .args(["add", "old", "--why", "w"])
+        .assert()
+        .success();
+    let old_date = {
+        let body = std::fs::read_to_string(sb.path()).unwrap();
+        body.lines()
+            .find(|l| l.starts_with("## "))
+            .and_then(|l| l.strip_prefix("## "))
+            .and_then(|s| s.split_whitespace().next())
+            .unwrap()
+            .to_string()
+    };
+    sb.cmd()
+        .args(["supersede", &old_date, "new", "--why", "better"])
+        .assert()
+        .success();
+    sb.cmd()
+        .args(["export", "--format", "json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(format!(
+            "\"supersedes\": \"{old_date}\""
+        )));
+}
+
+#[test]
+fn piped_output_has_no_ansi_codes() {
+    // assert_cmd runs with stdout piped (not a TTY), so Auto must NOT colorize.
+    let sb = Sandbox::new();
+    sb.cmd().args(["add", "t", "--why", "w"]).assert().success();
+    let out = sb.cmd().arg("last").assert().success();
+    let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    assert!(
+        !stdout.contains('\x1b'),
+        "piped output must contain no ANSI escapes"
+    );
+    assert!(stdout.contains("## "));
+}
+
+#[test]
+fn color_always_injects_ansi_even_when_piped() {
+    let sb = Sandbox::new();
+    sb.cmd().args(["add", "t", "--why", "w"]).assert().success();
+    let out = sb
+        .cmd()
+        .args(["--color", "always", "last"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    assert!(
+        stdout.contains('\x1b'),
+        "--color always must emit ANSI escapes"
+    );
+}
+
+#[test]
+fn color_never_suppresses_ansi() {
+    let sb = Sandbox::new();
+    sb.cmd().args(["add", "t", "--why", "w"]).assert().success();
+    let out = sb
+        .cmd()
+        .args(["--color", "never", "list"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    assert!(!stdout.contains('\x1b'));
+}
+
+#[test]
+fn export_json_never_colorized_even_with_color_always() {
+    // Machine output must stay clean regardless of the color flag.
+    let sb = Sandbox::new();
+    sb.cmd().args(["add", "t", "--why", "w"]).assert().success();
+    let out = sb
+        .cmd()
+        .args(["--color", "always", "export", "--format", "json"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    assert!(
+        !stdout.contains('\x1b'),
+        "json export must never contain ANSI"
+    );
+}
