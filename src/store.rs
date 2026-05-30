@@ -31,6 +31,7 @@ use std::path::Path;
 ///     rejected: None,
 ///     risk: None,
 ///     tags: &tags,
+///     supersedes: None,
 /// });
 /// assert!(block.starts_with("## 2026-05-16 — switched ORM\n"));
 /// ```
@@ -52,6 +53,10 @@ pub struct RenderInput<'a> {
     /// Tags to attach. Per-tag whitespace is trimmed and empty entries
     /// are dropped before rendering. An empty slice omits the tags line.
     pub tags: &'a [String],
+    /// Optional `supersedes` field — the `YYYY-MM-DD` date of an earlier
+    /// entry this one replaces. Rendered as `**supersedes:** <date>`.
+    /// `None` omits the line.
+    pub supersedes: Option<&'a str>,
 }
 
 /// Render a single entry block as markdown.
@@ -61,12 +66,15 @@ pub struct RenderInput<'a> {
 /// given the input; no global state is consulted.
 ///
 /// Field order in the output is fixed: `## date — title`, then `**why:**`,
-/// then optionally `**rejected:**`, `**risk:**`, `**tags:**`.
+/// then optionally `**supersedes:**`, `**rejected:**`, `**risk:**`, `**tags:**`.
 pub fn render_entry_block(input: &RenderInput<'_>) -> String {
     let mut out = format!(
         "## {} — {}\n**why:** {}\n",
         input.date, input.title, input.why
     );
+    if let Some(s) = input.supersedes.filter(|s| !s.trim().is_empty()) {
+        out.push_str(&format!("**supersedes:** {s}\n"));
+    }
     if let Some(r) = input.rejected.filter(|s| !s.trim().is_empty()) {
         out.push_str(&format!("**rejected:** {r}\n"));
     }
@@ -186,7 +194,29 @@ mod tests {
             rejected,
             risk,
             tags,
+            supersedes: None,
         }
+    }
+
+    #[test]
+    fn renders_supersedes_after_why() {
+        let tags: Vec<String> = vec![];
+        let mut input = ri("2026-05-16", "t", "w", None, None, &tags);
+        input.supersedes = Some("2026-05-01");
+        let out = render_entry_block(&input);
+        assert_eq!(
+            out,
+            "## 2026-05-16 — t\n**why:** w\n**supersedes:** 2026-05-01\n\n"
+        );
+    }
+
+    #[test]
+    fn omits_empty_supersedes() {
+        let tags: Vec<String> = vec![];
+        let mut input = ri("2026-05-16", "t", "w", None, None, &tags);
+        input.supersedes = Some("   ");
+        let out = render_entry_block(&input);
+        assert_eq!(out, "## 2026-05-16 — t\n**why:** w\n\n");
     }
 
     #[test]

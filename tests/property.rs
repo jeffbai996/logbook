@@ -24,6 +24,7 @@ fn snapshot_minimal_entry() {
         rejected: None,
         risk: None,
         tags: &tags,
+        supersedes: None,
     });
     insta::assert_snapshot!(block);
 }
@@ -42,6 +43,7 @@ fn snapshot_full_entry() {
             "lose automatic migrations — added manual scripts in db/migrations/ to compensate",
         ),
         tags: &tags,
+        supersedes: None,
     });
     insta::assert_snapshot!(block);
 }
@@ -56,6 +58,7 @@ fn snapshot_entry_with_only_tags() {
         rejected: None,
         risk: None,
         tags: &tags,
+        supersedes: None,
     });
     insta::assert_snapshot!(block);
 }
@@ -105,6 +108,7 @@ proptest! {
             rejected: rejected.as_deref(),
             risk: risk.as_deref(),
             tags: &tags,
+            supersedes: None,
         });
 
         let parsed = parse_entries(&block);
@@ -144,6 +148,7 @@ proptest! {
                 rejected: None,
                 risk: None,
                 tags: &[],
+                supersedes: None,
             }));
         }
 
