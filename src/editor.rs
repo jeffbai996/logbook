@@ -181,21 +181,34 @@ mod tests {
         restore("VISUAL", prev_v);
     }
 
-    /// Write a tiny executable shell script that appends `body` to the file it's
-    /// passed as $1, and return its path. Avoids needing quotes in the editor
-    /// command (spawn_editor splits on whitespace, which real editors tolerate
-    /// but a `sh -c '...'` one-liner would not).
+    /// Write a tiny native script that appends `body` to its first argument.
     fn fake_editor_appending(body: &str) -> std::path::PathBuf {
         let mut p = std::env::temp_dir();
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
+        #[cfg(unix)]
         p.push(format!(
             "logbook-fake-editor-{}-{stamp}.sh",
             std::process::id()
         ));
+        #[cfg(windows)]
+        p.push(format!(
+            "logbook-fake-editor-{}-{stamp}.cmd",
+            std::process::id()
+        ));
+        #[cfg(unix)]
         std::fs::write(&p, format!("#!/bin/sh\nprintf '{body}' >> \"$1\"\n")).unwrap();
+        #[cfg(windows)]
+        std::fs::write(
+            &p,
+            format!(
+                "@echo off\r\necho {}>> \"%~1\"\r\n",
+                body.trim_end_matches("\\n")
+            ),
+        )
+        .unwrap();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
