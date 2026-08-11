@@ -1,31 +1,14 @@
-//! `$EDITOR` integration for composing an entry's `why` text interactively.
-//!
-//! When `logbook add` is invoked without `--why`, it opens the user's editor
-//! on a temp file (git-commit style), then reads the saved content back as the
-//! `why`. Comment lines (starting with `#`) are stripped so a help template
-//! can be shown without polluting the entry.
-//!
-//! The spawn is isolated behind [`capture_via_editor`] so the pure parsing
-//! logic ([`strip_comments`]) and editor resolution ([`resolve_editor`]) can be
-//! unit-tested without real interactivity.
+//! `$EDITOR` integration for composing the decision reason.
 
 use crate::error::{Error, Result};
 use std::path::Path;
 use std::process::Command;
 
-/// Template shown in the editor when composing a `why`. Comment lines are
-/// stripped on read, so this guides without polluting the entry.
-pub const WHY_TEMPLATE: &str = "\n\
+const WHY_TEMPLATE: &str = "\n\
 # Write the WHY for this decision above — the reason you chose this design.\n\
 # Lines starting with '#' are ignored. An empty message aborts the entry.\n";
 
-/// Resolve which editor command to spawn.
-///
-/// Checks `$EDITOR` first, then `$VISUAL` (matching git's precedence is
-/// `GIT_EDITOR > core.editor > VISUAL > EDITOR`, but for a standalone tool the
-/// common convention is `EDITOR` then `VISUAL`). Returns [`Error::NoEditor`] if
-/// neither is set or both are empty/whitespace.
-pub fn resolve_editor() -> Result<String> {
+fn resolve_editor() -> Result<String> {
     for var in ["EDITOR", "VISUAL"] {
         if let Ok(v) = std::env::var(var) {
             if !v.trim().is_empty() {
@@ -36,18 +19,7 @@ pub fn resolve_editor() -> Result<String> {
     Err(Error::NoEditor)
 }
 
-/// Strip comment lines (those whose first non-whitespace char is `#`) and
-/// trim surrounding whitespace. Returns the cleaned body.
-///
-/// # Example
-///
-/// ```
-/// use logbook::editor::strip_comments;
-///
-/// let raw = "the real reason\n# a comment\nmore reason\n";
-/// assert_eq!(strip_comments(raw), "the real reason\nmore reason");
-/// ```
-pub fn strip_comments(raw: &str) -> String {
+fn strip_comments(raw: &str) -> String {
     raw.lines()
         .filter(|l| !l.trim_start().starts_with('#'))
         .collect::<Vec<_>>()
@@ -57,17 +29,10 @@ pub fn strip_comments(raw: &str) -> String {
 }
 
 /// Spawn `editor_cmd` on `file`, blocking until it exits.
-///
-/// `editor_cmd` may contain arguments (e.g. `"code --wait"`); it's split on
-/// whitespace and the file path appended as the final argument. Returns
-/// [`Error::Editor`] if the process fails to start or exits non-zero.
 fn spawn_editor(editor_cmd: &str, file: &Path) -> Result<()> {
-    let mut parts = editor_cmd.split_whitespace();
-    let program = parts
-        .next()
-        .ok_or_else(|| Error::Editor("empty editor command".into()))?;
-    let status = Command::new(program)
-        .args(parts)
+    let parts = split_editor_command(editor_cmd)?;
+    let status = Command::new(&parts[0])
+        .args(&parts[1..])
         .arg(file)
         .status()
         .map_err(|e| Error::Editor(format!("failed to spawn '{editor_cmd}': {e}")))?;
@@ -77,24 +42,44 @@ fn spawn_editor(editor_cmd: &str, file: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Open the resolved editor on a temp file seeded with [`WHY_TEMPLATE`], read
-/// the result back, strip comments, and return the cleaned `why` text.
-///
-/// Returns [`Error::EmptyEntry`] if the cleaned content is empty (user saved
-/// nothing or only comments), [`Error::NoEditor`] if no editor is configured,
-/// or [`Error::Editor`] on a spawn/exit failure. The temp file lives in the
-/// system temp dir and is removed before returning.
+fn split_editor_command(command: &str) -> Result<Vec<String>> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut quote = None;
+
+    for character in command.chars() {
+        match (quote, character) {
+            (Some(open), close) if open == close => quote = None,
+            (Some(_), value) => current.push(value),
+            (None, value @ ('\'' | '"')) => quote = Some(value),
+            (None, value) if value.is_whitespace() => {
+                if !current.is_empty() {
+                    parts.push(std::mem::take(&mut current));
+                }
+            }
+            (None, value) => current.push(value),
+        }
+    }
+    if quote.is_some() {
+        return Err(Error::Editor("unclosed quote in editor command".into()));
+    }
+    if !current.is_empty() {
+        parts.push(current);
+    }
+    if parts.is_empty() {
+        return Err(Error::Editor("empty editor command".into()));
+    }
+    Ok(parts)
+}
+
+/// Capture a decision reason with `$EDITOR`, falling back to `$VISUAL`.
 pub fn capture_via_editor() -> Result<String> {
     let editor = resolve_editor()?;
     capture_with(&editor, WHY_TEMPLATE)
 }
 
-/// Inner worker: write `template` to a temp file, run `editor` on it, read and
-/// clean the result. Separated so tests can pass a fake editor command (e.g. a
-/// script that writes a fixed body) without touching `$EDITOR`.
-pub fn capture_with(editor: &str, template: &str) -> Result<String> {
+fn capture_with(editor: &str, template: &str) -> Result<String> {
     let mut path = std::env::temp_dir();
-    // Unique-ish name without a random dep: pid + a monotonic-ish nanos stamp.
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
@@ -104,7 +89,7 @@ pub fn capture_with(editor: &str, template: &str) -> Result<String> {
     std::fs::write(&path, template).map_err(|e| Error::io("write editor temp file", &path, e))?;
     let spawn_result = spawn_editor(editor, &path);
     let read_result = std::fs::read_to_string(&path);
-    let _ = std::fs::remove_file(&path); // best-effort cleanup either way
+    let _ = std::fs::remove_file(&path);
 
     spawn_result?;
     let raw = read_result.map_err(|e| Error::io("read editor temp file", &path, e))?;
@@ -120,29 +105,23 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
-    // Env vars are process-global; serialize the tests that mutate EDITOR/VISUAL
-    // so parallel execution can't race one test's set against another's remove.
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
-    fn strip_comments_removes_hash_lines() {
+    fn strip_comments_handles_comments_whitespace_and_inline_hashes() {
         assert_eq!(strip_comments("real\n# nope\nmore"), "real\nmore");
-    }
-
-    #[test]
-    fn strip_comments_trims_and_handles_indented_hash() {
         assert_eq!(strip_comments("\n  # indented comment\nbody\n\n"), "body");
-    }
-
-    #[test]
-    fn strip_comments_all_comments_is_empty() {
         assert_eq!(strip_comments("# a\n#b\n   # c"), "");
+        assert_eq!(strip_comments("uses C#  and F#"), "uses C#  and F#");
     }
 
     #[test]
-    fn strip_comments_preserves_hash_inside_line() {
-        // Only leading-# lines are comments; a '#' mid-line stays.
-        assert_eq!(strip_comments("uses C#  and F#"), "uses C#  and F#");
+    fn editor_command_supports_quoted_paths_and_arguments() {
+        assert_eq!(
+            split_editor_command(r#""C:\Program Files\Editor\edit.exe" --wait"#).unwrap(),
+            [r"C:\Program Files\Editor\edit.exe", "--wait"]
+        );
+        assert!(split_editor_command("\"unterminated").is_err());
     }
 
     #[test]
@@ -181,13 +160,19 @@ mod tests {
         restore("VISUAL", prev_v);
     }
 
-    /// Write a tiny native script that appends `body` to its first argument.
-    fn fake_editor_appending(body: &str) -> std::path::PathBuf {
-        let mut p = std::env::temp_dir();
+    fn fake_editor_appending(body: &str, path_has_spaces: bool) -> std::path::PathBuf {
+        let mut dir = std::env::temp_dir();
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
+        dir.push(format!(
+            "logbook{}editor-{}-{stamp}",
+            if path_has_spaces { " " } else { "-" },
+            std::process::id()
+        ));
+        std::fs::create_dir(&dir).unwrap();
+        let mut p = dir;
         #[cfg(unix)]
         p.push(format!(
             "logbook-fake-editor-{}-{stamp}.sh",
@@ -219,26 +204,32 @@ mod tests {
 
     #[test]
     fn capture_with_reads_back_written_content() {
-        let ed = fake_editor_appending("the reason\\n");
+        let ed = fake_editor_appending("the reason\\n", false);
         let why = capture_with(ed.to_str().unwrap(), WHY_TEMPLATE).unwrap();
         assert_eq!(why, "the reason");
-        let _ = std::fs::remove_file(&ed);
+        std::fs::remove_dir_all(ed.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn capture_with_accepts_a_quoted_editor_path() {
+        let ed = fake_editor_appending("quoted path\\n", true);
+        let command = format!("\"{}\"", ed.display());
+        let why = capture_with(&command, WHY_TEMPLATE).unwrap();
+        assert_eq!(why, "quoted path");
+        std::fs::remove_dir_all(ed.parent().unwrap()).unwrap();
     }
 
     #[test]
     fn capture_with_empty_result_is_empty_entry_error() {
-        // Editor that writes nothing real (only the template's comments remain).
-        let editor = "true"; // no-op
         assert!(matches!(
-            capture_with(editor, WHY_TEMPLATE),
+            capture_with("true", WHY_TEMPLATE),
             Err(Error::EmptyEntry)
         ));
     }
 
     #[test]
     fn capture_with_failing_editor_is_editor_error() {
-        let editor = "false"; // exits non-zero
-        assert!(matches!(capture_with(editor, ""), Err(Error::Editor(_))));
+        assert!(matches!(capture_with("false", ""), Err(Error::Editor(_))));
     }
 
     fn restore(key: &str, prev: Option<String>) {
