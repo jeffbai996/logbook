@@ -47,3 +47,9 @@ Newest entries at the bottom. Generated and maintained by `logbook` — https://
 **risk:** homebrew formula has placeholder SHA256s until the release.yml run completes and update_logbook.sh patches them in — first install attempt before that runs will fail loudly. crates.io publish is irreversible: version numbers can never be re-used even on yank. release.yml cross-compiles aarch64-linux via gcc-aarch64-linux-gnu — most binaries work but anything that links openssl-sys would fail (we don't, but future deps need to be checked)
 **tags:** release, distribution, crates-io, homebrew
 
+## 2026-08-10 — 0.4.0 — bounded retrieval and maintenance reset
+**why:** add limits to existing read commands, make supersession references unambiguous, and remove maintenance ceremony without changing the one-file model
+**rejected:** new context command, decision IDs or an index, preserving Rust 1.75 through dependency pins
+**risk:** older supersession entries remain date-only; the supported Rust floor rises to 1.85
+**tags:** release, scope, maintenance
+
