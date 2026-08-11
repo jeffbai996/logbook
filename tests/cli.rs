@@ -1,7 +1,4 @@
-//! End-to-end CLI tests. Each test spawns the actual `logbook` binary in
-//! an isolated tempdir and exercises one piece of behaviour. The LOGBOOK_FILE
-//! env var is used to avoid the binary touching cwd, which keeps tests
-//! parallel-safe.
+//! End-to-end CLI contract tests.
 
 use assert_cmd::Command;
 use predicates::prelude::*;
@@ -33,6 +30,10 @@ impl Sandbox {
         // Be a good citizen: don't inherit the user's actual env that
         // might point LOGBOOK_FILE somewhere else.
         c
+    }
+
+    fn seed(&self, body: &str) {
+        std::fs::write(self.path(), body).unwrap();
     }
 }
 
@@ -425,6 +426,31 @@ fn export_empty_logbook_is_empty_array() {
 }
 
 #[test]
+fn list_and_export_limit_to_recent_entries() {
+    let sb = Sandbox::new();
+    sb.seed(
+        "## 2026-01-01 — first\n**why:** a\n\n\
+         ## 2026-01-02 — second\n**why:** b\n\n\
+         ## 2026-01-03 — third\n**why:** c\n",
+    );
+
+    sb.cmd()
+        .args(["list", "--limit", "2"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("third"))
+        .stdout(predicate::str::contains("second"))
+        .stdout(predicate::str::contains("first").not());
+
+    sb.cmd()
+        .args(["export", "--limit", "1"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("third"))
+        .stdout(predicate::str::contains("second").not());
+}
+
+#[test]
 fn export_unknown_format_errors() {
     let sb = Sandbox::new();
     sb.cmd().args(["add", "t", "--why", "w"]).assert().success();
@@ -434,9 +460,7 @@ fn export_unknown_format_errors() {
         .failure();
 }
 
-/// Write an executable fake-editor script that appends `body` to the file it's
-/// given as $1. spawn_editor splits the editor command on whitespace, so a bare
-/// script path (no args/quotes) is the portable way to fake an editor.
+/// Write an executable fake editor that appends `body` to its first argument.
 #[cfg(unix)]
 fn fake_editor(dir: &std::path::Path, body: &str) -> PathBuf {
     use std::os::unix::fs::PermissionsExt;
@@ -540,7 +564,42 @@ fn supersede_appends_entry_linking_to_old_date() {
 
     let body = std::fs::read_to_string(sb.path()).unwrap();
     assert!(body.contains("— drop ORM for raw SQL"));
-    assert!(body.contains(&format!("**supersedes:** {old_date}")));
+    assert!(body.contains(&format!("**supersedes:** {old_date} — use ORM")));
+}
+
+#[test]
+fn supersede_requires_old_title_when_a_date_is_ambiguous() {
+    let sb = Sandbox::new();
+    sb.cmd()
+        .args(["add", "first", "--why", "a"])
+        .assert()
+        .success();
+    sb.cmd()
+        .args(["add", "second", "--why", "b"])
+        .assert()
+        .success();
+    let date = chrono::Local::now().format("%Y-%m-%d").to_string();
+
+    sb.cmd()
+        .args(["supersede", &date, "replacement", "--why", "c"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--old-title"));
+
+    sb.cmd()
+        .args([
+            "supersede",
+            &date,
+            "replacement",
+            "--why",
+            "c",
+            "--old-title",
+            "second",
+        ])
+        .assert()
+        .success();
+    let body = std::fs::read_to_string(sb.path()).unwrap();
+    assert!(body.contains(&format!("**supersedes:** {date} — second")));
 }
 
 #[test]
@@ -593,8 +652,56 @@ fn supersede_appears_in_json_export() {
         .assert()
         .success()
         .stdout(predicate::str::contains(format!(
-            "\"supersedes\": \"{old_date}\""
+            "\"supersedes\": \"{old_date} — old\""
         )));
+}
+
+#[test]
+fn list_combines_date_and_tag_filters() {
+    let sb = Sandbox::new();
+    sb.seed(
+        "## 2026-01-10 — old db\n**why:** a\n**tags:** db\n\n\
+         ## 2026-02-15 — current db\n**why:** b\n**tags:** DB\n\n\
+         ## 2026-03-20 — current ui\n**why:** c\n**tags:** ui\n",
+    );
+    sb.cmd()
+        .args([
+            "list",
+            "--tag",
+            "db",
+            "--since",
+            "2026-02-01",
+            "--until",
+            "2026-02-28",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("current db"))
+        .stdout(predicate::str::contains("old db").not())
+        .stdout(predicate::str::contains("current ui").not());
+}
+
+#[test]
+fn add_with_stage_stages_the_logbook() {
+    let sb = Sandbox::new();
+    Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(sb.dir.path())
+        .assert()
+        .success();
+
+    sb.cmd()
+        .current_dir(sb.dir.path())
+        .args(["add", "decision", "--why", "w", "--stage"])
+        .assert()
+        .success();
+
+    Command::new("git")
+        .args(["diff", "--cached", "--name-only"])
+        .current_dir(sb.dir.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("logbook.md"));
 }
 
 #[test]

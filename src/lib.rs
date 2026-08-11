@@ -1,59 +1,14 @@
-//! # logbook
-//!
-//! Core library for the [`logbook`](https://github.com/jeffbai996/logbook)
-//! CLI. The binary in `src/main.rs` is a thin wrapper around the pure
-//! functions and types defined here, which lets the integration suite
-//! exercise the parser, error paths, and atomic-write logic directly
-//! without shelling out.
-//!
-//! Most consumers should use the CLI; this library is exposed so that
-//! tooling (test suites, downstream integrations, alternative front-ends
-//! like a web viewer) can manipulate logbook files without re-implementing
-//! the format.
-//!
-//! ## Example: append an entry to a file
-//!
-//! ```no_run
-//! use logbook::{atomic_append, init_file, render_entry_block, RenderInput, today};
-//! use std::path::Path;
-//!
-//! let path = Path::new("logbook.md");
-//! init_file(path)?;
-//!
-//! let date = today();
-//! let block = render_entry_block(&RenderInput {
-//!     date: &date,
-//!     title: "switched to websockets",
-//!     why: "polling was hammering the API",
-//!     rejected: Some("redis pub/sub (overkill)"),
-//!     risk: None,
-//!     tags: &["refactor".to_string(), "perf".to_string()],
-//!     supersedes: None,
-//! });
-//! atomic_append(path, &block)?;
-//! # Ok::<(), logbook::Error>(())
-//! ```
-//!
-//! ## Example: parse an existing file
-//!
-//! ```
-//! use logbook::parse_entries;
-//!
-//! let text = "# logbook\n\n## 2026-05-16 — t\n**why:** w\n**tags:** refactor, perf\n";
-//! let entries = parse_entries(text);
-//! assert_eq!(entries.len(), 1);
-//! assert_eq!(entries[0].date.as_deref(), Some("2026-05-16"));
-//! assert_eq!(entries[0].tags, vec!["refactor", "perf"]);
-//! ```
+//! Parser, renderer, and filesystem support for the `logbook` CLI.
 
-pub mod color;
-pub mod editor;
-pub mod error;
-pub mod export;
-pub mod parse;
-pub mod store;
+mod color;
+mod editor;
+mod error;
+mod export;
+mod parse;
+mod store;
 
 pub use color::{colorize_block, should_colorize, ColorChoice};
+pub use editor::capture_via_editor;
 pub use error::{Error, Result};
 pub use export::entries_to_json;
 pub use parse::{parse_entries, Entry};
@@ -62,79 +17,28 @@ pub use store::{atomic_append, init_file, read_text, render_entry_block, RenderI
 use chrono::Local;
 use std::path::PathBuf;
 
-/// Default filename used when [`ENV_VAR`] is not set: `logbook.md`.
+/// Default decision-log filename.
 pub const DEFAULT_LOGBOOK_FILE: &str = "logbook.md";
 
-/// Environment variable that overrides the default logbook path.
-///
-/// Set `LOGBOOK_FILE` to any path (relative or absolute) and the CLI will
-/// read and write that file instead of `./logbook.md`. Useful for
-/// monorepos (`LOGBOOK_FILE=docs/decisions.md`) or for keeping a personal
-/// log in a fixed location across projects.
+/// Environment variable that overrides [`DEFAULT_LOGBOOK_FILE`].
 pub const ENV_VAR: &str = "LOGBOOK_FILE";
 
-/// Markdown header written to a freshly-initialized logbook file.
-///
-/// Ends with a blank line so subsequent entries don't merge into the header.
-pub const HEADER: &str = "# logbook\n\nAppend-only record of architectural decisions for this project.\nNewest entries at the bottom. Generated and maintained by `logbook` — https://github.com/jeffbai996/logbook\n\n";
+/// Header written to a new logbook.
+pub const HEADER: &str = "# logbook\n\nAppend-only record of decisions for this project.\nNewest entries are at the bottom.\n\n";
 
-/// Resolve the logbook file path.
-///
-/// Returns `$LOGBOOK_FILE` if set, otherwise `./logbook.md`. The path is
-/// not canonicalized — callers can do that themselves if they want an
-/// absolute path (the CLI's `where` subcommand does).
-///
-/// # Example
-///
-/// ```
-/// use logbook::{logbook_path, DEFAULT_LOGBOOK_FILE};
-/// use std::path::PathBuf;
-///
-/// std::env::remove_var("LOGBOOK_FILE");
-/// assert_eq!(logbook_path(), PathBuf::from(DEFAULT_LOGBOOK_FILE));
-/// ```
+/// Return `$LOGBOOK_FILE`, or `logbook.md` when it is unset.
 pub fn logbook_path() -> PathBuf {
     std::env::var_os(ENV_VAR)
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(DEFAULT_LOGBOOK_FILE))
 }
 
-/// Today's date in `YYYY-MM-DD` format, local time.
-///
-/// Centralized so that any future change to the date convention (UTC,
-/// fixed timezone, ISO 8601 with time component) only needs one edit.
-///
-/// # Example
-///
-/// ```
-/// let today = logbook::today();
-/// assert_eq!(today.len(), 10);
-/// assert_eq!(today.chars().filter(|c| *c == '-').count(), 2);
-/// ```
+/// Return today's local date as `YYYY-MM-DD`.
 pub fn today() -> String {
     Local::now().format("%Y-%m-%d").to_string()
 }
 
-/// Cheap shape check for date arguments.
-///
-/// Returns `true` iff `s` looks like `YYYY-MM-DD` — ten characters,
-/// dashes at positions 4 and 7, digits everywhere else. **This is not
-/// calendar validation**: `2026-13-99` shapes correctly even though it
-/// isn't a real day. That's intentional — wrong real-world dates just
-/// return no matches when used as filters, which is the right UX. Full
-/// calendar validation would force us to take on a date-parsing dep
-/// like `chrono::NaiveDate::parse_from_str` for negligible value.
-///
-/// # Example
-///
-/// ```
-/// use logbook::is_date_shaped;
-///
-/// assert!(is_date_shaped("2026-05-16"));
-/// assert!(!is_date_shaped("2026-5-16"));
-/// assert!(!is_date_shaped("banana1234"));
-/// assert!(!is_date_shaped("2O26-05-16")); // letter O, not zero
-/// ```
+/// Check the byte shape `YYYY-MM-DD` without calendar validation.
 pub fn is_date_shaped(s: &str) -> bool {
     if s.len() != 10 {
         return false;
@@ -148,33 +52,25 @@ pub fn is_date_shaped(s: &str) -> bool {
 }
 
 #[cfg(test)]
-mod date_tests {
+mod tests {
     use super::is_date_shaped;
 
     #[test]
-    fn accepts_valid_shape() {
-        assert!(is_date_shaped("2026-05-16"));
-        assert!(is_date_shaped("0001-01-01"));
-        assert!(is_date_shaped("9999-12-31"));
-    }
-
-    #[test]
-    fn rejects_wrong_length() {
-        assert!(!is_date_shaped(""));
-        assert!(!is_date_shaped("2026-5-16"));
-        assert!(!is_date_shaped("2026-05-16T00:00:00"));
-    }
-
-    #[test]
-    fn rejects_non_digit_or_dash_chars() {
-        assert!(!is_date_shaped("banana1234"));
-        assert!(!is_date_shaped("2026/05/16"));
-        assert!(!is_date_shaped("2O26-05-16")); // capital O, not zero
-    }
-
-    #[test]
-    fn rejects_misplaced_dashes() {
-        assert!(!is_date_shaped("20-2605-16"));
-        assert!(!is_date_shaped("2026-0516-"));
+    fn recognizes_date_shape() {
+        for valid in ["2026-05-16", "0001-01-01", "9999-12-31"] {
+            assert!(is_date_shaped(valid), "{valid}");
+        }
+        for invalid in [
+            "",
+            "2026-5-16",
+            "2026-05-16T00:00:00",
+            "banana1234",
+            "2026/05/16",
+            "2O26-05-16",
+            "20-2605-16",
+            "2026-0516-",
+        ] {
+            assert!(!is_date_shaped(invalid), "{invalid}");
+        }
     }
 }
