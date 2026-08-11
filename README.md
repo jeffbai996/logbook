@@ -3,72 +3,29 @@
 [![crates.io](https://img.shields.io/crates/v/logbook.svg)](https://crates.io/crates/logbook)
 [![docs.rs](https://docs.rs/logbook/badge.svg)](https://docs.rs/logbook)
 [![CI](https://github.com/jeffbai996/logbook/actions/workflows/ci.yml/badge.svg)](https://github.com/jeffbai996/logbook/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Rust 1.75+](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
 
-> A tiny CLI that gives every repo a single `logbook.md` for "why I made this decision and what I rejected" — the architectural context that's currently scattered across your head, half-written PR descriptions, and Slack threads.
+`logbook` is a tiny CLI for keeping a decision log in each repository.
 
-```bash
-$ logbook add "switched ORM to raw SQL" \
-    --why "ORM was generating 14-join queries for 3-table lookups" \
-    --rejected "ORM query hints (still magic), custom resolver (too much code)" \
-    --risk "lose auto-migrations — added manual scripts in db/migrations/" \
-    --tag perf --tag db --stage
+Code tells you what it does. Git tells you what changed. Logbook tells you why.
 
-added: 2026-05-16 — switched ORM to raw SQL
-staged logbook.md
-```
-
-That command appends a structured entry to `./logbook.md` and stages it for your next commit. Three months later, when you've forgotten why the codebase looks the way it does, `logbook last` or `logbook search orm` brings it back.
-
----
-
-## Table of contents
-
-- [Why this exists](#why-this-exists)
-- [What it isn't](#what-it-isnt)
-- [Install](#install)
-- [Quickstart](#quickstart)
-- [Commands](#commands)
-- [Entry format](#entry-format)
-- [Using logbook with LLM coding agents](#using-logbook-with-llm-coding-agents)
-- [Comparison to alternatives](#comparison-to-alternatives)
-- [FAQ](#faq)
-- [Development](#development)
-- [Roadmap](#roadmap)
-- [License](#license)
-
-## Why this exists
-
-The code tells you *what* it does. `git log` tells you *what changed*. Neither tells you **why you picked this design over the alternatives** — and that's the context you lose first when you come back to a project after a month away.
-
-For solo developers this is annoying. For developers working alongside an LLM coding agent (Claude Code, Cursor, Aider, …) it's worse: the agent loses state every session, and you become the human glue carrying architectural decisions in your head. `logbook.md` lives in the repo, so the agent can `cat` it at session start and inherit every decision you've made.
-
-The fix is intentionally dumb: a single markdown file in the repo, committed in git, with a small CLI to append entries to it. No service, no database, no editor plugin, no SaaS.
-
-## What it isn't
-
-- **Not a README.** READMEs explain what the project does, for users.
-- **Not a CHANGELOG.** CHANGELOGs are for end-users tracking what shipped.
-- **Not a commit message.** Commits say what changed in *this* diff.
-- **Not a full ADR (Architecture Decision Record) framework.** ADRs are great for teams with formal review processes. `logbook` is what you reach for when ADRs feel like too much ceremony.
-- **Not a design doc.** When you need diagrams, prose, or stakeholder review, write a design doc.
-
-`logbook` fills the gap *between* commit messages and design docs: the architectural choices the code itself can't justify.
+Each repository gets one append-only `logbook.md`: no service, database,
+account, plugin system, or generated project structure. It sits between terse
+commit messages and full architecture decision records.
 
 ## Install
 
-**Any platform with Rust:**
+With Rust 1.85 or newer:
 
 ```bash
 cargo install logbook
 ```
 
-**Prebuilt binary (no toolchain required):**
+Prebuilt archives for Linux, macOS, and Windows are available from the
+[latest GitHub release](https://github.com/jeffbai996/logbook/releases/latest).
+The release includes x86_64 and ARM64 Linux/macOS builds, a static musl Linux
+build, and an x86_64 Windows build.
 
-Grab the archive for your platform from the [latest release](https://github.com/jeffbai996/logbook/releases/latest), extract it, and drop the binary on your `$PATH`. Prebuilt targets: `x86_64-linux` (glibc), `x86_64-linux-musl` (static — Alpine, scratch containers), `aarch64-linux`, `x86_64-macos`, `aarch64-macos` (Apple Silicon), `x86_64-windows`.
-
-**From source:**
+From a checkout:
 
 ```bash
 git clone https://github.com/jeffbai996/logbook.git
@@ -76,209 +33,133 @@ cd logbook
 cargo install --path .
 ```
 
-Requires [Rust](https://rustup.rs) 1.75 or newer. After installing, `logbook` is on your `$PATH`:
+## 60-second example
+
+Run this inside a repository:
 
 ```bash
-$ logbook --version
-logbook 0.3.0
+logbook init
+logbook add "use SQLite for local state" \
+  --why "it keeps installation to one binary and one data file" \
+  --rejected "Postgres requires a service for a single-user tool" \
+  --risk "write concurrency is limited" \
+  --tag storage \
+  --stage
+
+logbook last
+logbook search SQLite
 ```
 
-## Quickstart
+`add` also creates `logbook.md` if `init` was skipped. `--stage` runs
+`git add logbook.md`; logbook never commits for you.
+
+Omit `--why` to write the reason in `$EDITOR` (or `$VISUAL`):
 
 ```bash
-cd ~/your-project
-logbook init                 # one-time per repo
-logbook add "switched to websocket" \
-  --why  "polling was getting rate-limited" \
-  --tag  perf \
-  --stage                    # also runs `git add logbook.md`
+logbook add "keep the parser line-oriented"
 ```
 
-That's it. Future entries are the same shape. The four common workflows:
+## Core commands
 
-| To do this | Run |
+| Command | Purpose |
 |---|---|
-| Record a decision while you're making it | `logbook add "title" --why "..." [--rejected ...] [--risk ...] [--tag X] --stage` |
-| Look up what you decided recently | `logbook last` or `logbook list \| head -50` |
-| Find a specific past decision | `logbook search <term>` |
-| Recall what you decided on a date | `logbook show 2026-05-16` |
+| `logbook init` | Create `logbook.md` if it does not exist. |
+| `logbook add <title> [options]` | Append a decision with `--why`, `--rejected`, `--risk`, repeatable `--tag`, optional `--stage`, and optional `--print`. |
+| `logbook list [--tag X] [--since DATE] [--until DATE] [--limit N]` | Print matching entries newest first. |
+| `logbook last` | Print the newest entry. |
+| `logbook show <DATE>` | Print entries recorded on a date. |
+| `logbook search <term>` | Search all entry text, case-insensitively. |
+| `logbook supersede <DATE> <new-title> [options]` | Append a decision that replaces an earlier one. |
+| `logbook export [--format json] [--limit N]` | Emit stable JSON, optionally limited to recent entries. |
+| `logbook tags` | List tags with counts. |
+| `logbook stats` | Show entry, date-range, monthly, and tag counts. |
+| `logbook where` | Print the resolved logbook path. |
 
-## Commands
+Use `logbook <command> --help` for the full flags. Human-facing reads honor
+`--color auto|always|never` and `NO_COLOR`; piped output and JSON never gain
+automatic ANSI escapes.
 
-| Command | What it does |
-|---|---|
-| `logbook init` | Create the logbook file with a header. Idempotent. |
-| `logbook add <title> [--why <reason>] [--rejected …] [--risk …] [--tag X]… [--stage] [--print]` | Append a new entry. With no `--why`, opens `$EDITOR` to compose it. `--tag` is repeatable. `--stage` runs `git add`. `--print` echoes the rendered block. |
-| `logbook supersede <YYYY-MM-DD> <title> [--why …] [--rejected …] [--risk …] [--tag X]… [--stage]` | Append a new entry that formally supersedes the entry on the given date (which must exist), recording a `**supersedes:**` link. |
-| `logbook list [--tag X] [--since YYYY-MM-DD] [--until YYYY-MM-DD]` | Print entries newest-first with optional filters (all combinable). |
-| `logbook last` | Print the most recent entry only. |
-| `logbook show <YYYY-MM-DD>` | Print every entry from a specific date. |
-| `logbook search <term>` | Case-insensitive substring search across all entries. |
-| `logbook export [--format json]` | Emit all entries as structured data (JSON array) for tooling. |
-| `logbook tags` | List all distinct tags with usage counts. |
-| `logbook stats` | Total entries, date range, entries-this-month, unique tags. |
-| `logbook where` | Print the resolved logbook file path (honors `LOGBOOK_FILE`). |
+Set `LOGBOOK_FILE` to use a different relative or absolute path, such as
+`docs/decisions.md` in a monorepo.
 
-Global flag: `--color <auto\|always\|never>` controls colorized output for `list`/`last`/`show`/`search` (default `auto`: color only on a terminal, honoring `NO_COLOR`).
+## Superseding a decision
 
-Run `logbook --help` or `logbook <cmd> --help` for the full flag reference.
+Supersession appends; it never edits the old entry:
 
-### Environment
+```bash
+logbook supersede 2026-08-01 "move state to Postgres" \
+  --why "write contention is now measurable" \
+  --old-title "use SQLite for local state" \
+  --risk "adds an operational dependency"
+```
 
-| Variable | Effect |
-|---|---|
-| `LOGBOOK_FILE` | Override the default `./logbook.md`. Useful for monorepos (`LOGBOOK_FILE=docs/decisions.md`), or for keeping a personal log in a fixed location across projects. |
+`--old-title` is optional when only one entry exists on the old date. When
+several entries share that date, logbook requires the title rather than writing
+an ambiguous reference. The new entry records both the date and old title, so
+`show` and `search` trace the decision in either direction.
 
-## Entry format
+## Agent usage
 
-`logbook.md` is plain markdown. The CLI only ever appends — it never rewrites old content. You can edit the file by hand if you want.
+Agents usually need a bounded recent view, not the whole file:
 
-Each entry follows this shape:
+```bash
+logbook list --limit 10
+logbook export --limit 10
+```
+
+The first is readable Markdown; the second is machine-readable JSON. A useful
+repository instruction is:
 
 ```markdown
-## YYYY-MM-DD — <title>
-**why:** <reason this was chosen>
-**rejected:** <alternatives considered and why not>
-**risk:** <what could go wrong>
-**tags:** <comma-separated tags>
+At the start of work, read `logbook list --limit 10`. Treat recorded decisions
+as constraints unless a later entry supersedes them. Record only non-obvious
+product or architecture choices.
 ```
 
-Only the title and `--why` are required. `--rejected`, `--risk`, and `--tag` are optional but recommended for non-trivial decisions.
+No agent integration is required. An agent can also read `logbook.md` directly.
 
-A real entry looks like:
+## Format and philosophy
+
+Entries are ordinary Markdown:
 
 ```markdown
-## 2026-05-16 — atomic writes via tempfile + rename
-**why:** crashes during write could leave logbook.md half-written; rename(2) is atomic on POSIX so write-then-rename guarantees the file is either fully old or fully new, never partial
-**rejected:** fsync on every write (overkill for human-pace writes); fcntl file locking (overkill — we don't have multiple writers fighting)
-**risk:** reads entire file into memory before rewriting — fine until logbooks have millions of entries
-**tags:** robustness, io
+## 2026-08-10 — use SQLite for local state
+**why:** it keeps installation to one binary and one data file
+**rejected:** Postgres requires a service for a single-user tool
+**risk:** write concurrency is limited
+**tags:** storage
+
+## 2026-08-20 — move state to Postgres
+**why:** write contention is now measurable
+**supersedes:** 2026-08-10 — use SQLite for local state
+**risk:** adds an operational dependency
+**tags:** storage
 ```
 
-## Using logbook with LLM coding agents
+Only the title and `why` are required. The CLI appends canonical entries and
+preserves existing text. Hand edits remain possible because Markdown is the
+source of truth, but changed decisions should normally be superseded rather
+than rewritten.
 
-A common workflow: have your agent (Claude Code, Cursor, Aider, etc.) read `logbook.md` at the start of every session so it inherits accumulated decisions.
-
-For [Claude Code](https://docs.anthropic.com/claude/docs/claude-code), add to your `CLAUDE.md`:
-
-```markdown
-At session start, run: `logbook list | head -100`
-Treat every entry as an architectural constraint unless explicitly superseded.
-When you make a non-obvious choice, suggest a `logbook add` command for the user to run.
-```
-
-For [Aider](https://aider.chat), add `logbook.md` to your `.aider.conf.yml` `read`-only file list. For [Cursor](https://www.cursor.com), reference it in `.cursorrules`.
-
-This turns the logbook into the agent's long-term memory for the project, with zero extra infrastructure.
-
-## Comparison to alternatives
-
-| Approach | Strength | Weakness vs `logbook` |
-|---|---|---|
-| **CHANGELOG.md** | End-user-facing, semver-aligned | Doesn't capture *rejected* alternatives or risks; written for outsiders, not the author |
-| **`docs/adr/*.md` (full ADRs)** | Battle-tested by enterprises, lots of tooling | Heavyweight — one file per decision, formal status workflow, real overhead. `logbook` is the lite version. |
-| **PR descriptions** | Co-located with the diff, contextual | Lost when PRs get merged and you can't find them again; not greppable from the working tree |
-| **Slack/Notion/Confluence** | Searchable, supports rich content | Decoupled from the repo, requires login, the link rots, the agent can't read it |
-| **Code comments** | Right next to the code | No place for *rejected* alternatives or cross-file decisions; rot pressure |
-| **Mental model + memory** | Free | Lossy, doesn't transfer to teammates or to your future self |
-
-The honest take: if your team already runs full ADRs and likes them, keep doing that. `logbook` exists for the much larger group of developers (and solo developers) for whom ADRs are too much.
-
-## FAQ
-
-**Why markdown over JSON/YAML?**
-A logbook is for humans first, machines second. Markdown renders well in `cat`, on GitHub, in `less`, in your editor, and inside an LLM's context window. The parser extracts the few structured bits we need (date, tags); the rest is intentionally free-form.
-
-**Can I edit `logbook.md` by hand?**
-Yes — the CLI never rewrites old content. As long as you keep the `## YYYY-MM-DD — title` heading shape, the parser will continue to extract the date and tags correctly.
-
-**What happens if I run `logbook add` from two terminals simultaneously?**
-Each `add` reads the file, appends in memory, writes to a sibling tempfile, then renames on top. The rename is atomic on POSIX and Windows. Worst case, one of the two writes is lost (last-writer-wins); the file is never corrupted.
-
-**Why isn't there an `--edit` flag to fix typos?**
-Append-only is a deliberate philosophy. If a decision is reversed or refined, write a new entry that supersedes the old one — the history of *how thinking changed* is part of the value. If you really need to fix a typo, edit `logbook.md` directly.
-
-**Does it work without git?**
-Yes. The `--stage` flag invokes `git add` for convenience but the rest of the tool doesn't care. You can use `logbook` in a directory that isn't a git repo at all.
-
-**Why a custom file format instead of, say, conventional commits?**
-Conventional commits live in git history, which means they're harder to read all-at-once and require git tooling to query. `logbook.md` is one greppable file you can `cat` from anywhere — including from inside an LLM session.
-
-**Is this overengineered?**
-Honestly, no — it's the opposite. It's a single binary, three runtime dependencies (`clap`, `chrono`, `thiserror`), and a markdown file. The hard part wasn't writing it; the hard part was deciding *not* to add features (editor mode, server mode, plugins, syncing, etc.). See the roadmap's "Not on the roadmap" section.
-
-**What's the binary size?**
-About 1.2 MB on Linux, stripped. Starts in <5 ms. Uses ~1 MB RAM. You can run it from a git pre-commit hook without noticing.
+The scope is deliberately fixed: one repository, one file, local CLI, git-native.
+Logbook will not grow a GUI, hosted service, database, sync layer, plugin system,
+semantic search, daemon, telemetry, or automatic decision extraction.
 
 ## Development
 
 ```bash
-git clone https://github.com/jeffbai996/logbook.git
-cd logbook
-cargo build              # debug build
-cargo test               # full test suite (unit + integration + property + doctest)
-cargo doc --open         # browse the rustdoc-rendered API docs
-cargo fmt --all          # format
+cargo test --locked
+cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
+cargo build --release --locked
 ```
 
-Snapshot tests use [`insta`](https://insta.rs). If you intentionally change the rendered entry format, install `cargo-insta` (`cargo install cargo-insta`) and run `cargo insta review` to accept the new snapshots.
+CI runs tests on Linux, macOS, and Windows and separately verifies the Rust
+1.85 MSRV. Releases package six prebuilt archives from version tags.
 
-### Layout
-
-The codebase is a library plus a binary, so the test suite can exercise the parser and IO directly without shelling out:
-
-| Path | Purpose |
-|---|---|
-| `src/lib.rs` | Public re-exports, path/date helpers, constants |
-| `src/error.rs` | Typed `Error` enum (`NotFound`, `BadDate`, `Io`, `Git`) |
-| `src/parse.rs` | Pure markdown → `Vec<Entry>` parser (no I/O) |
-| `src/store.rs` | File I/O including `atomic_append` |
-| `src/main.rs` | `clap` CLI definitions and dispatch (thin) |
-| `tests/cli.rs` | End-to-end tests via `assert_cmd` against tempdir sandboxes |
-| `tests/property.rs` | `proptest` round-trip + `insta` snapshot tests |
-| `tests/snapshots/` | Frozen output snapshots reviewed via `cargo insta review` |
-
-### CI
-
-GitHub Actions runs on every push to `main` and on every PR:
-
-- **Build + test** on ubuntu-latest, macos-latest, and windows-latest (matrix).
-- **Lint**: `cargo fmt --all -- --check` + `cargo clippy --all-targets -- -D warnings`.
-
-A push is only green when all three OSes build, all 56 tests pass, the code is rustfmt-clean, and clippy finds zero warnings.
-
-## Roadmap
-
-**0.1.x — testing & polish** ✅
-- ~~Test suite~~ ✅ 56 tests across 4 categories
-- ~~Better error messages~~ ✅ typed `Error` enum
-- ~~Atomic writes~~ ✅ shipped in 0.0.3
-- ~~`LOGBOOK_FILE` env var~~ ✅ shipped in 0.0.3
-- ~~CI on three OSes~~ ✅
-- ~~Property + snapshot tests~~ ✅ shipped in 0.1.1
-- ~~Full rustdoc coverage~~ ✅ shipped in 0.1.1
-
-**0.2.x — distribution** ✅
-- ~~Publish to crates.io so `cargo install logbook` works~~ ✅ shipped in 0.2.0
-- ~~Prebuilt binaries via GitHub Releases for macOS, Linux, Windows~~ ✅ shipped in 0.2.0 (5 targets)
-- ~~Static `x86_64-linux-musl` binary for Alpine / scratch containers~~ ✅ shipped in 0.2.1
-- ~~`CHANGELOG.md` + crates.io / docs.rs badges~~ ✅ shipped in 0.2.1
-- Homebrew tap — dropped in 0.3.0 (no audience; `cargo install` and prebuilt binaries cover all platforms)
-
-**0.3.0 — ergonomics** ✅ *current*
-- ~~`logbook add` opens `$EDITOR` when `--why` is omitted (git-commit style)~~ ✅
-- ~~`logbook supersede <old-date> "new title" --why ...` — formal supersession syntax linking the new entry to the old one~~ ✅
-- ~~Colored TTY output (off when piped)~~ ✅
-- ~~`logbook export --format json` for tooling integrations~~ ✅
-
-**Maybe-someday**
-- Shell completion (`logbook completions bash`)
-- A read-only web viewer that renders `logbook.md` as a timeline
-- Team mode: aggregate logbooks across multiple repos for retro reviews
-
-**Not on the roadmap.** Editing past entries, deleting entries, server mode, GUI, plugins, multi-user sync. Scope creep is the enemy.
+Contributions should preserve the product boundary; see
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+[MIT](LICENSE)

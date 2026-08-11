@@ -1,69 +1,102 @@
 # Changelog
 
-All notable changes to `logbook` are documented in this file.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+Notable changes to `logbook` are recorded here.
 
 ## [Unreleased]
+
+## [0.4.0] - 2026-08-10
+
+### Added
+
+- `--limit N` for `list` and `export`, giving humans and coding agents a
+  bounded view of recent decisions without a new context command.
+- `--old-title` for selecting a supersession target when several entries share
+  a date.
+
+### Changed
+
+- Superseding entries now record the old date and title, making references
+  traceable instead of date-ambiguous.
+- Raised the MSRV from Rust 1.75 to 1.85. Current `clap`, `assert_cmd`, and
+  `proptest` releases already require 1.85, and the lockfile is not readable by
+  Cargo 1.75. CI now tests the declared MSRV directly.
+- Narrowed the library API to the core crate-root re-exports. Internal module
+  paths and editor/testing helpers are no longer public; parser, renderer,
+  export, error, and filesystem types remain available at the crate root.
+- Reduced repetitive README, rustdoc, comments, and tests while retaining the
+  parser, append/supersede, filesystem, CLI, output, and cross-platform
+  contracts.
+
+### Fixed
+
+- Quoted editor paths and editor commands containing arguments now work.
+- Atomic appends use unique sibling temp files, clean them up on failure, and
+  preserve existing file permissions. Concurrent writers can no longer
+  interfere through one shared `logbook.md.tmp` path.
+- Release instructions now match the six shipped archives and no longer
+  reference the retired Homebrew tap.
+
+### Removed
+
+- Snapshot-test dependency and snapshots that duplicated exact renderer unit
+  tests.
+- Speculative viewer/team roadmap items and repository contribution templates
+  that added ceremony without serving current users.
 
 ## [0.3.0] - 2026-05-29
 
 ### Added
-- `logbook export --format json` — emit all entries as a structured JSON array (`date`, `title`, `why`, `rejected`, `risk`, `supersedes`, `tags`) for tooling integrations: indexing, ingesting into a memory store, or feeding an LLM agent a repo's decision history as data rather than raw markdown. Dependency-free encoder with RFC 8259 escaping.
-- `$EDITOR` integration — `logbook add "title"` with no `--why` now opens `$EDITOR` (falling back to `$VISUAL`) on a git-commit-style template; comment lines are stripped, an empty message aborts without writing.
-- `logbook supersede <old-date> "new title" --why …` — append a new entry that formally supersedes an earlier one, recording a `**supersedes:**` link. The target date must exist. Keeps a decision log truthful over time — superseded reasoning is visibly marked rather than silently stale.
-- Colored output — `--color <auto|always|never>` colorizes `list`/`last`/`show`/`search` (bold headers and field labels). `auto` colors only on a TTY; honors `NO_COLOR`. Piped output and `export` stay byte-for-byte uncolored.
+
+- JSON export with stable fields and dependency-free escaping.
+- `$EDITOR`/`$VISUAL` flow when `--why` is omitted.
+- Append-only supersession syntax.
+- TTY-aware colored output honoring `NO_COLOR`.
 
 ### Removed
-- Homebrew tap (`brew install jeffbai996/tap/logbook`) — retired for lack of an audience. `cargo install logbook` and the prebuilt GitHub-release binaries cover every platform.
+
+- Homebrew tap; crates.io and prebuilt archives remain the supported install
+  paths.
 
 ## [0.2.1] - 2026-05-19
 
 ### Added
-- `CHANGELOG.md` at project root, following Keep a Changelog format.
-- crates.io and docs.rs badges in `README.md`.
-- `x86_64-unknown-linux-musl` target in the release workflow — static binary for Alpine, scratch containers, and ancient glibc systems.
+
+- Changelog and crates.io/docs.rs badges.
+- Static `x86_64-unknown-linux-musl` release target.
 
 ## [0.2.0] - 2026-05-19
 
 ### Added
-- Published to [crates.io](https://crates.io/crates/logbook) — install with `cargo install logbook`.
-- Prebuilt release binaries on GitHub Releases for five targets: `x86_64-linux`, `aarch64-linux`, `x86_64-mac`, `aarch64-mac`, `x86_64-windows`.
-- Homebrew tap: `brew install jeffbai996/tap/logbook`.
-- CI release workflow that builds and uploads binaries on every tag push.
 
-### Changed
-- `Cargo.toml` polished for crates.io publication (description, keywords, categories, repository, documentation links).
+- crates.io publication and prebuilt GitHub release archives.
 
 ## [0.1.1] - 2026-05-17
 
 ### Added
-- Full rustdoc coverage on every public library item.
-- Property tests and snapshot tests for the parser/renderer.
+
+- Parser/renderer property tests and public API documentation.
+- MIT license.
 
 ### Changed
-- README rewritten for public onboarding.
 
-### Added
-- MIT `LICENSE` file at project root.
+- Reworked the README for first-time users.
 
 ## [0.1.0] - 2026-05-16
 
 ### Added
-- First version intended to be depended on by other projects.
-- Library + binary split: `src/lib.rs` exposes the parser/renderer, `src/main.rs` is a slim CLI wrapper.
-- Custom `Error` type replacing ad-hoc string errors.
-- End-to-end CLI integration suite (19 tests).
-- Unit tests for parser, date validator, and renderer.
-- GitHub Actions CI: build + test on Linux/macOS/Windows, `cargo fmt` and `cargo clippy` lint.
+
+- Library/binary split, typed errors, CLI integration tests, and
+  Linux/macOS/Windows CI.
 
 ## [0.0.3] - earlier
 
 ### Added
-- Initial prototype releases (0.0.1 → 0.0.3) — pre-public iterations of the CLI surface and `logbook.md` format.
 
-[Unreleased]: https://github.com/jeffbai996/logbook/compare/v0.3.0...HEAD
+- Initial CLI, tags, filters, atomic writes, `LOGBOOK_FILE`, and utility
+  commands across the 0.0.x prototypes.
+
+[Unreleased]: https://github.com/jeffbai996/logbook/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/jeffbai996/logbook/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/jeffbai996/logbook/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/jeffbai996/logbook/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/jeffbai996/logbook/compare/v0.1.1...v0.2.0
