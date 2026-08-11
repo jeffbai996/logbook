@@ -4,6 +4,7 @@ use logbook::{
     read_text, render_entry_block, today, Entry, Error, RenderInput, Result, ENV_VAR,
 };
 use std::collections::BTreeMap;
+use std::num::NonZeroUsize;
 use std::path::Path;
 use std::process::{Command, ExitCode};
 
@@ -50,8 +51,10 @@ enum Cmd {
         /// The reason for the decision. If omitted, opens $EDITOR to compose it.
         #[arg(long)]
         why: Option<String>,
+        /// Alternatives considered and why they were rejected
         #[arg(long)]
         rejected: Option<String>,
+        /// Risk or tradeoff accepted with the decision
         #[arg(long)]
         risk: Option<String>,
         /// One or more tags (repeatable: --tag refactor --tag db)
@@ -67,12 +70,18 @@ enum Cmd {
 
     /// Print entries, newest first, with optional filters
     List {
+        /// Match a tag case-insensitively
         #[arg(long)]
         tag: Option<String>,
+        /// Include entries on or after this date
         #[arg(long)]
         since: Option<String>,
+        /// Include entries on or before this date
         #[arg(long)]
         until: Option<String>,
+        /// Stop after this many matching entries
+        #[arg(long, value_name = "N")]
+        limit: Option<NonZeroUsize>,
     },
 
     /// Case-insensitive search across entries
@@ -93,11 +102,14 @@ enum Cmd {
     /// Print the resolved logbook file path (honors LOGBOOK_FILE)
     Where,
 
-    /// Export all entries as structured data (currently JSON)
+    /// Export entries as structured data (currently JSON)
     Export {
         /// Output format
         #[arg(long, value_enum, default_value_t = ExportFormat::Json)]
         format: ExportFormat,
+        /// Export only the N most recent entries
+        #[arg(long, value_name = "N")]
+        limit: Option<NonZeroUsize>,
     },
 
     /// Append a new entry that formally supersedes an earlier one
@@ -109,12 +121,18 @@ enum Cmd {
         /// The reason for the change. If omitted, opens $EDITOR to compose it.
         #[arg(long)]
         why: Option<String>,
+        /// Alternatives considered and why they were rejected
         #[arg(long)]
         rejected: Option<String>,
+        /// Risk or tradeoff accepted with the decision
         #[arg(long)]
         risk: Option<String>,
+        /// One or more tags (repeatable)
         #[arg(long = "tag", value_name = "TAG")]
         tags: Vec<String>,
+        /// Title of the old decision (required when the date is ambiguous)
+        #[arg(long, value_name = "TITLE")]
+        old_title: Option<String>,
         /// Also run `git add <logbook>` after writing
         #[arg(long)]
         stage: bool,
@@ -166,16 +184,25 @@ fn dispatch(cmd: Cmd, colorize: bool) -> Result<()> {
             stage,
             print,
         } => add(title, why, rejected, risk, tags, stage, print),
-        Cmd::List { tag, since, until } => {
-            list(tag.as_deref(), since.as_deref(), until.as_deref(), colorize)
-        }
+        Cmd::List {
+            tag,
+            since,
+            until,
+            limit,
+        } => list(
+            tag.as_deref(),
+            since.as_deref(),
+            until.as_deref(),
+            limit,
+            colorize,
+        ),
         Cmd::Search { term } => search(&term, colorize),
         Cmd::Last => last(colorize),
         Cmd::Show { date } => show(&date, colorize),
         Cmd::Tags => tags_cmd(),
         Cmd::Stats => stats(),
         Cmd::Where => print_where(),
-        Cmd::Export { format } => export(format),
+        Cmd::Export { format, limit } => export(format, limit),
         Cmd::Supersede {
             old_date,
             title,
@@ -183,8 +210,9 @@ fn dispatch(cmd: Cmd, colorize: bool) -> Result<()> {
             rejected,
             risk,
             tags,
+            old_title,
             stage,
-        } => supersede(old_date, title, why, rejected, risk, tags, stage),
+        } => supersede(old_date, old_title, title, why, rejected, risk, tags, stage),
     }
 }
 
@@ -210,7 +238,7 @@ fn add(
     // Resolve `why`: use the flag if given, otherwise open $EDITOR to compose it.
     let why = match why {
         Some(w) => w,
-        None => logbook::editor::capture_via_editor()?,
+        None => logbook::capture_via_editor()?,
     };
 
     let path = logbook_path();
@@ -248,6 +276,7 @@ fn add(
 #[allow(clippy::too_many_arguments)]
 fn supersede(
     old_date: String,
+    old_title: Option<String>,
     title: String,
     why: Option<String>,
     rejected: Option<String>,
@@ -257,18 +286,44 @@ fn supersede(
 ) -> Result<()> {
     validate_date_arg("old_date", &old_date)?;
 
-    // The target entry must exist — you can't supersede a decision never recorded.
     let existing = load_entries()?;
-    if !existing
+    let dated: Vec<&Entry> = existing
         .iter()
-        .any(|e| e.date.as_deref() == Some(&old_date))
-    {
+        .filter(|e| e.date.as_deref() == Some(&old_date))
+        .collect();
+    if dated.is_empty() {
         return Err(Error::SupersedeTargetMissing(old_date));
     }
+    let target = match old_title.as_deref() {
+        Some(wanted) => {
+            let matches: Vec<&Entry> = dated
+                .into_iter()
+                .filter(|e| e.title.as_deref() == Some(wanted))
+                .collect();
+            match matches.as_slice() {
+                [entry] => *entry,
+                [] => {
+                    return Err(Error::SupersedeTitleMissing {
+                        date: old_date,
+                        title: wanted.to_string(),
+                    })
+                }
+                _ => return Err(Error::SupersedeTargetAmbiguous(old_date)),
+            }
+        }
+        None => match dated.as_slice() {
+            [entry] => *entry,
+            _ => return Err(Error::SupersedeTargetAmbiguous(old_date)),
+        },
+    };
+    let reference = match target.title.as_deref() {
+        Some(old_title) => format!("{old_date} — {old_title}"),
+        None => old_date,
+    };
 
     let why = match why {
         Some(w) => w,
-        None => logbook::editor::capture_via_editor()?,
+        None => logbook::capture_via_editor()?,
     };
 
     let path = logbook_path();
@@ -280,10 +335,10 @@ fn supersede(
         rejected: rejected.as_deref(),
         risk: risk.as_deref(),
         tags: &tags,
-        supersedes: Some(&old_date),
+        supersedes: Some(&reference),
     });
     atomic_append(&path, &block)?;
-    println!("added: {date} — {title} (supersedes {old_date})");
+    println!("added: {date} — {title} (supersedes {reference})");
 
     if stage {
         git_add(&path)?;
@@ -311,6 +366,7 @@ fn list(
     tag_filter: Option<&str>,
     since: Option<&str>,
     until: Option<&str>,
+    limit: Option<NonZeroUsize>,
     colorize: bool,
 ) -> Result<()> {
     if let Some(s) = since {
@@ -347,6 +403,9 @@ fn list(
         }
         emit(&entry.raw, colorize);
         hits += 1;
+        if limit.is_some_and(|limit| hits >= limit.get()) {
+            break;
+        }
     }
     if hits == 0 {
         println!("no entries match the given filters");
@@ -454,10 +513,13 @@ fn stats() -> Result<()> {
     Ok(())
 }
 
-fn export(format: ExportFormat) -> Result<()> {
+fn export(format: ExportFormat, limit: Option<NonZeroUsize>) -> Result<()> {
     let entries = load_entries()?;
+    let start = limit
+        .map(|limit| entries.len().saturating_sub(limit.get()))
+        .unwrap_or(0);
     match format {
-        ExportFormat::Json => println!("{}", entries_to_json(&entries)),
+        ExportFormat::Json => println!("{}", entries_to_json(&entries[start..])),
     }
     Ok(())
 }
