@@ -54,6 +54,7 @@ pub mod parse;
 pub mod store;
 
 pub use color::{colorize_block, should_colorize, ColorChoice};
+pub use editor::capture_via_editor;
 pub use error::{Error, Result};
 pub use export::entries_to_json;
 pub use parse::{parse_entries, Entry};
