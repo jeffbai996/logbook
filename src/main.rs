@@ -1,8 +1,9 @@
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, CommandFactory, Parser, Subcommand};
+use clap_complete::Shell;
 use logbook::{
-    atomic_append, entries_to_json, entries_to_json_lines, init_file, is_valid_date, parse_entries,
-    read_text, render_entry_block, resolve_logbook_path, today, validate_entries, Entry, Error,
-    RenderInput, Result, ENV_VAR,
+    atomic_append, check_report_to_json, entries_to_json, entries_to_json_lines, init_file,
+    is_valid_date, parse_entries, read_text, render_entry_block, resolve_logbook_path, today,
+    validate_entries, Entry, Error, RenderInput, Result, ENV_VAR,
 };
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
@@ -49,8 +50,11 @@ struct FilterArgs {
     #[arg(long)]
     until: Option<String>,
     /// Include only decisions not superseded by a later entry
-    #[arg(long)]
+    #[arg(long, conflicts_with = "superseded")]
     active: bool,
+    /// Include only decisions superseded by a later entry
+    #[arg(long)]
+    superseded: bool,
     /// Stop after this many matching recent entries
     #[arg(long, value_name = "N")]
     limit: Option<NonZeroUsize>,
@@ -145,10 +149,17 @@ enum Cmd {
         /// Exact title of the decision to trace
         #[arg(long)]
         title: Option<String>,
+        /// Output format
+        #[arg(long, value_enum, default_value_t = InspectionFormat::Human)]
+        format: InspectionFormat,
     },
 
     /// Validate required fields, dates, and supersession links
-    Check,
+    Check {
+        /// Output format
+        #[arg(long, value_enum, default_value_t = InspectionFormat::Human)]
+        format: InspectionFormat,
+    },
 
     /// List all distinct tags with usage counts
     Tags,
@@ -158,6 +169,13 @@ enum Cmd {
 
     /// Print the resolved logbook file path (honors LOGBOOK_FILE)
     Where,
+
+    /// Generate a shell completion script
+    Completions {
+        /// Shell to generate completions for
+        #[arg(value_enum)]
+        shell: Shell,
+    },
 
     /// Export entries as structured data
     Export {
@@ -210,6 +228,14 @@ enum ExportFormat {
     Json,
     /// One compact JSON object per line
     Jsonl,
+}
+
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum InspectionFormat {
+    /// Terminal-native entry or diagnostic output
+    Human,
+    /// Stable JSON for scripts and coding agents
+    Json,
 }
 
 struct NewEntry {
@@ -297,11 +323,16 @@ fn dispatch(cmd: Cmd, path: &Path, colorize: bool) -> Result<()> {
         Cmd::Search { term, filters } => list(path, Some(&term), &filters, colorize, Some(&term)),
         Cmd::Last => last(path, colorize),
         Cmd::Show { date, title } => show(path, &date, title.as_deref(), colorize),
-        Cmd::Trace { date, title } => trace(path, &date, title.as_deref(), colorize),
-        Cmd::Check => check(path),
+        Cmd::Trace {
+            date,
+            title,
+            format,
+        } => trace(path, &date, title.as_deref(), format, colorize),
+        Cmd::Check { format } => check(path, format),
         Cmd::Tags => tags_cmd(path),
         Cmd::Stats => stats(path),
         Cmd::Where => print_where(path),
+        Cmd::Completions { shell } => completions(shell),
         Cmd::Export {
             format,
             search,
@@ -624,6 +655,7 @@ fn matching_entries<'a>(
         .iter()
         .filter(|entry| {
             (!filters.active || entry.is_active())
+                && (!filters.superseded || !entry.is_active())
                 && tags
                     .iter()
                     .all(|needle| entry.tags.iter().any(|tag| tag.to_lowercase() == *needle))
@@ -685,7 +717,13 @@ fn show(path: &Path, date: &str, title: Option<&str>, colorize: bool) -> Result<
     Ok(())
 }
 
-fn trace(path: &Path, date: &str, title: Option<&str>, colorize: bool) -> Result<()> {
+fn trace(
+    path: &Path,
+    date: &str,
+    title: Option<&str>,
+    format: InspectionFormat,
+    colorize: bool,
+) -> Result<()> {
     validate_date_arg("date", date)?;
     let entries = load_entries(path)?;
     let selected = select_entry(&entries, date, title)?;
@@ -734,8 +772,19 @@ fn trace(path: &Path, date: &str, title: Option<&str>, colorize: bool) -> Result
         }
     }
 
-    for index in chain {
-        emit(&entries[index].raw, colorize)?;
+    match format {
+        InspectionFormat::Human => {
+            for index in chain {
+                emit(&entries[index].raw, colorize)?;
+            }
+        }
+        InspectionFormat::Json => {
+            let selected: Vec<Entry> = chain
+                .into_iter()
+                .map(|index| entries[index].clone())
+                .collect();
+            outln!("{}", entries_to_json(&selected))?;
+        }
     }
     Ok(())
 }
@@ -778,23 +827,41 @@ fn matching_prior(entries: &[Entry], before: usize, reference: &str) -> Vec<usiz
         .collect()
 }
 
-fn check(path: &Path) -> Result<()> {
+fn check(path: &Path, format: InspectionFormat) -> Result<()> {
     let entries = load_entries(path)?;
     let issues = validate_entries(&entries);
     if !issues.is_empty() {
-        let mut stderr = std::io::stderr().lock();
-        for issue in &issues {
-            let _ = writeln!(stderr, "entry {}: {}", issue.entry, issue.message);
+        match format {
+            InspectionFormat::Human => {
+                let mut stderr = std::io::stderr().lock();
+                for issue in &issues {
+                    let _ = writeln!(stderr, "entry {}: {}", issue.entry, issue.message);
+                }
+            }
+            InspectionFormat::Json => outln!("{}", check_report_to_json(&entries, &issues))?,
         }
         return Err(Error::CheckFailed(issues.len()));
     }
     let active = entries.iter().filter(|entry| entry.is_active()).count();
-    outln!(
-        "ok: {} entries ({active} active, {} superseded)",
-        entries.len(),
-        entries.len() - active
-    )?;
+    match format {
+        InspectionFormat::Human => outln!(
+            "ok: {} entries ({active} active, {} superseded)",
+            entries.len(),
+            entries.len() - active
+        )?,
+        InspectionFormat::Json => outln!("{}", check_report_to_json(&entries, &issues))?,
+    }
     Ok(())
+}
+
+fn completions(shell: Shell) -> Result<()> {
+    let mut command = Cli::command();
+    let mut output = Vec::new();
+    clap_complete::generate(shell, &mut command, "logbook", &mut output);
+    std::io::stdout()
+        .lock()
+        .write_all(&output)
+        .map_err(Error::Output)
 }
 
 fn tags_cmd(path: &Path) -> Result<()> {

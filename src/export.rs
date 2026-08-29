@@ -1,6 +1,6 @@
 //! Stable JSON export for parsed entries.
 
-use crate::Entry;
+use crate::{Entry, ValidationIssue};
 
 /// Render entries as a pretty-printed JSON array in document order.
 pub fn entries_to_json(entries: &[Entry]) -> String {
@@ -70,6 +70,36 @@ pub fn entries_to_json_lines(entries: &[Entry]) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// Render the result of `logbook check` as a stable JSON object.
+pub fn check_report_to_json(entries: &[Entry], issues: &[ValidationIssue]) -> String {
+    let active = entries.iter().filter(|entry| entry.is_active()).count();
+    let mut out = String::from("{\n");
+    out.push_str(&format!("  \"valid\": {},\n", issues.is_empty()));
+    out.push_str(&format!("  \"entries\": {},\n", entries.len()));
+    out.push_str(&format!("  \"active\": {active},\n"));
+    out.push_str(&format!("  \"superseded\": {},\n", entries.len() - active));
+    out.push_str("  \"issues\": [");
+    if issues.is_empty() {
+        out.push_str("]\n");
+    } else {
+        out.push('\n');
+        for (index, issue) in issues.iter().enumerate() {
+            out.push_str(&format!(
+                "    {{\"entry\": {}, \"message\": {}}}",
+                issue.entry,
+                json_string(&issue.message)
+            ));
+            if index + 1 < issues.len() {
+                out.push(',');
+            }
+            out.push('\n');
+        }
+        out.push_str("  ]\n");
+    }
+    out.push('}');
+    out
 }
 
 fn opt_str(value: Option<&str>) -> String {
@@ -182,5 +212,20 @@ mod tests {
         assert_eq!(lines.lines().count(), 2);
         assert!(lines.lines().next().unwrap().contains("\"active\":false"));
         assert!(lines.contains("\"superseded_by\":[\"2026-01-02 — new\"]"));
+    }
+
+    #[test]
+    fn check_report_has_counts_and_escaped_issues() {
+        let entries = parse_entries("## 2026-01-01 — one\n**why:** because\n");
+        let issues = vec![ValidationIssue {
+            entry: 1,
+            message: "bad \"field\"".into(),
+        }];
+        let report = check_report_to_json(&entries, &issues);
+        assert!(report.contains("\"valid\": false"));
+        assert!(report.contains("\"entries\": 1"));
+        assert!(report.contains("\"active\": 1"));
+        assert!(report.contains("\"superseded\": 0"));
+        assert!(report.contains("\"message\": \"bad \\\"field\\\"\""));
     }
 }

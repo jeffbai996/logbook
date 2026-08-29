@@ -12,7 +12,7 @@ mod validate;
 pub use color::{colorize_block, should_colorize, ColorChoice};
 pub use editor::capture_via_editor;
 pub use error::{Error, Result};
-pub use export::{entries_to_json, entries_to_json_lines};
+pub use export::{check_report_to_json, entries_to_json, entries_to_json_lines};
 pub use parse::{parse_entries, Entry};
 pub use path::resolve_logbook_path;
 pub use store::{atomic_append, init_file, read_text, render_entry_block, RenderInput};
