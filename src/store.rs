@@ -6,6 +6,7 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -56,11 +57,21 @@ fn non_empty(value: Option<&str>) -> Option<&str> {
 
 /// Create a new logbook header without changing an existing file.
 pub fn init_file(path: &Path) -> Result<bool> {
-    if path.exists() {
-        return Ok(false);
+    match OpenOptions::new().write(true).create_new(true).open(path) {
+        Ok(mut file) => {
+            if let Err(error) = file
+                .write_all(HEADER.as_bytes())
+                .and_then(|()| file.sync_all())
+            {
+                drop(file);
+                let _ = fs::remove_file(path);
+                return Err(Error::io("create", path, error));
+            }
+            Ok(true)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
+        Err(error) => Err(Error::io("create", path, error)),
     }
-    fs::write(path, HEADER).map_err(|error| Error::io("create", path, error))?;
-    Ok(true)
 }
 
 /// Read the configured logbook as UTF-8 text.
@@ -73,8 +84,9 @@ pub fn read_text(path: &Path) -> Result<String> {
     fs::read_to_string(path).map_err(|error| Error::io("read", path, error))
 }
 
-/// Replace `path` atomically with its existing bytes followed by `block`.
+/// Serialize appenders and atomically replace `path` with `block` appended.
 pub fn atomic_append(path: &Path, block: &str) -> Result<()> {
+    let _lock = AppendLock::acquire(path)?;
     let (existing, permissions) = if path.exists() {
         let bytes = fs::read(path).map_err(|error| Error::io("read", path, error))?;
         let permissions = fs::metadata(path)
@@ -96,7 +108,8 @@ pub fn atomic_append(path: &Path, block: &str) -> Result<()> {
             .map_err(|error| Error::io("copy existing contents to", &tmp, error))?;
         file.write_all(block.as_bytes())
             .map_err(|error| Error::io("write new entry to", &tmp, error))?;
-        let _ = file.sync_all();
+        file.sync_all()
+            .map_err(|error| Error::io("sync", &tmp, error))?;
         drop(file);
         if let Some(permissions) = permissions {
             fs::set_permissions(&tmp, permissions)
@@ -114,6 +127,56 @@ pub fn atomic_append(path: &Path, block: &str) -> Result<()> {
         return Err(Error::io("rename temp file to", path, error));
     }
     Ok(())
+}
+
+struct AppendLock {
+    path: PathBuf,
+}
+
+impl AppendLock {
+    fn acquire(path: &Path) -> Result<Self> {
+        let lock_path = lock_path_for(path);
+        let started = Instant::now();
+        loop {
+            match fs::create_dir(&lock_path) {
+                Ok(()) => return Ok(Self { path: lock_path }),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    if lock_is_stale(&lock_path) {
+                        let _ = fs::remove_dir(&lock_path);
+                        continue;
+                    }
+                    if started.elapsed() >= Duration::from_secs(5) {
+                        return Err(Error::Locked(lock_path));
+                    }
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(error) => return Err(Error::io("create write lock", &lock_path, error)),
+            }
+        }
+    }
+}
+
+impl Drop for AppendLock {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir(&self.path);
+    }
+}
+
+fn lock_is_stale(path: &Path) -> bool {
+    fs::metadata(path)
+        .and_then(|metadata| metadata.modified())
+        .ok()
+        .and_then(|modified| modified.elapsed().ok())
+        .is_some_and(|age| age >= Duration::from_secs(30))
+}
+
+fn lock_path_for(path: &Path) -> PathBuf {
+    let mut name = path
+        .file_name()
+        .map(OsString::from)
+        .unwrap_or_else(|| OsString::from("logbook"));
+    name.push(".lock");
+    path.with_file_name(name)
 }
 
 fn tmp_path_for(path: &Path) -> PathBuf {
@@ -187,6 +250,41 @@ mod tests {
     }
 
     #[test]
+    fn concurrent_initialization_never_truncates_an_existing_file() {
+        let dir = tempdir().unwrap();
+        let path = std::sync::Arc::new(dir.path().join("logbook.md"));
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(16));
+        let handles: Vec<_> = (0..16)
+            .map(|_| {
+                let path = std::sync::Arc::clone(&path);
+                let barrier = std::sync::Arc::clone(&barrier);
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    init_file(&path).unwrap()
+                })
+            })
+            .collect();
+        assert_eq!(
+            handles
+                .into_iter()
+                .map(|handle| handle.join().unwrap())
+                .filter(|created| *created)
+                .count(),
+            1
+        );
+
+        atomic_append(&path, "## 2026-05-16 — kept\n**why:** w\n\n").unwrap();
+        let handles: Vec<_> = (0..16)
+            .map(|_| {
+                let path = std::sync::Arc::clone(&path);
+                std::thread::spawn(move || init_file(&path).unwrap())
+            })
+            .collect();
+        assert!(handles.into_iter().all(|handle| !handle.join().unwrap()));
+        assert!(read_text(&path).unwrap().contains("— kept"));
+    }
+
+    #[test]
     fn atomic_append_preserves_existing_content_and_cleans_up() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("logbook.md");
@@ -205,6 +303,33 @@ mod tests {
         let second = tmp_path_for(path);
         assert_ne!(first, second);
         assert_eq!(first.parent(), path.parent());
+    }
+
+    #[test]
+    fn concurrent_appends_do_not_lose_entries() {
+        let dir = tempdir().unwrap();
+        let path = std::sync::Arc::new(dir.path().join("logbook.md"));
+        init_file(&path).unwrap();
+
+        let handles: Vec<_> = (0..16)
+            .map(|index| {
+                let path = std::sync::Arc::clone(&path);
+                std::thread::spawn(move || {
+                    atomic_append(
+                        &path,
+                        &format!("## 2026-05-16 — entry {index}\n**why:** w\n\n"),
+                    )
+                    .unwrap();
+                })
+            })
+            .collect();
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        let text = read_text(&path).unwrap();
+        assert_eq!(crate::parse_entries(&text).len(), 16);
+        assert!(!lock_path_for(&path).exists());
     }
 
     #[cfg(unix)]
