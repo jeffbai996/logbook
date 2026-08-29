@@ -4,6 +4,26 @@ Notable changes to `logbook` are recorded here.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-08-29
+
+### Added
+
+- `--superseded` complements `--active` across `list`, `search`, and `export`,
+  making either side of a reversed decision directly retrievable.
+- `trace --format json` emits a complete supersession chain as stable entry
+  objects in decision order.
+- `check --format json` emits validation status, decision-state counts, and all
+  structural issues while preserving the command's nonzero failure status.
+- `completions` generates scripts for Bash, Elvish, Fish, PowerShell, and Zsh.
+
+### Changed
+
+- Added the narrowly scoped `clap_complete` dependency for completion
+  generation. Its Rust 1.85 requirement matches the existing MSRV.
+- Version 0.5.1 is the frozen feature-complete surface. Future releases are
+  limited to fixes, portability, and maintenance unless real use exposes a
+  missing core decision-log workflow.
+
 ## [0.5.0] - 2026-08-29
 
 ### Added
@@ -147,7 +167,8 @@ Notable changes to `logbook` are recorded here.
 - Initial CLI, tags, filters, atomic writes, `LOGBOOK_FILE`, and utility
   commands across the 0.0.x prototypes.
 
-[Unreleased]: https://github.com/jeffbai996/logbook/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/jeffbai996/logbook/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/jeffbai996/logbook/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/jeffbai996/logbook/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/jeffbai996/logbook/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/jeffbai996/logbook/compare/v0.2.1...v0.3.0

@@ -1,6 +1,6 @@
 # Contributing to logbook
 
-Logbook 0.5 is feature-complete for its intended scope. Bug fixes, portability
+Logbook 0.5.1 is feature-complete for its intended scope. Bug fixes, portability
 improvements, dependency upkeep, and changes that clarify the existing workflow
 are welcome. New commands need evidence of a missing core decision-log workflow;
 there is no standing feature roadmap. Services, databases, plugins, automatic
