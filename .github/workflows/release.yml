@@ -1,10 +1,6 @@
 name: release
 
-# Builds prebuilt binaries for every tagged release and attaches them to
-# the GitHub Release. Users without a Rust toolchain can then download
-# the right archive from the Releases page and drop the binary on $PATH.
-#
-# Trigger: push of a tag matching v*.*.*
+# Build six archives for a version tag, then publish them in one release job.
 on:
   push:
     tags:
@@ -17,7 +13,7 @@ jobs:
   preflight:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install stable toolchain
         run: rustup toolchain install stable --profile minimal --no-self-update
       - name: Verify tag and package
@@ -43,7 +39,7 @@ jobs:
           - { os: windows-latest, target: x86_64-pc-windows-msvc,      archive: zip   }
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust + target
         run: |
@@ -89,10 +85,34 @@ jobs:
             echo "ASSET=${STEM}.tar.gz" >> "$GITHUB_ENV"
           fi
 
-      - name: Upload to GitHub Release
-        uses: softprops/action-gh-release@v2
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v7
         with:
-          files: ${{ env.ASSET }}
+          name: logbook-${{ matrix.target }}
+          path: ${{ env.ASSET }}
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download archives
+        uses: actions/download-artifact@v8
+        with:
+          pattern: logbook-*
+          path: dist
+          merge-multiple: true
+      - name: Write checksums
+        working-directory: dist
+        run: sha256sum logbook-* > SHA256SUMS
+      - name: Publish GitHub Release once
+        uses: softprops/action-gh-release@v3
+        with:
+          files: dist/*
           generate_release_notes: true
           draft: false
           prerelease: false
+          make_latest: true
+          overwrite_files: true
