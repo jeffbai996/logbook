@@ -3,6 +3,9 @@
 use crate::error::{Error, Result};
 use std::path::Path;
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 const WHY_TEMPLATE: &str = "\n\
 # Write the WHY for this decision above — the reason you chose this design.\n\
@@ -79,12 +82,7 @@ pub fn capture_via_editor() -> Result<String> {
 }
 
 fn capture_with(editor: &str, template: &str) -> Result<String> {
-    let mut path = std::env::temp_dir();
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    path.push(format!("logbook-why-{}-{}.md", std::process::id(), stamp));
+    let path = editor_temp_path();
 
     std::fs::write(&path, template).map_err(|e| Error::io("write editor temp file", &path, e))?;
     let spawn_result = spawn_editor(editor, &path);
@@ -100,6 +98,20 @@ fn capture_with(editor: &str, template: &str) -> Result<String> {
     Ok(cleaned)
 }
 
+fn editor_temp_path() -> std::path::PathBuf {
+    let mut path = std::env::temp_dir();
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let count = TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    path.push(format!(
+        "logbook-why-{}-{stamp}-{count}.md",
+        std::process::id()
+    ));
+    path
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -113,6 +125,11 @@ mod tests {
         assert_eq!(strip_comments("\n  # indented comment\nbody\n\n"), "body");
         assert_eq!(strip_comments("# a\n#b\n   # c"), "");
         assert_eq!(strip_comments("uses C#  and F#"), "uses C#  and F#");
+    }
+
+    #[test]
+    fn editor_temp_paths_are_unique() {
+        assert_ne!(editor_temp_path(), editor_temp_path());
     }
 
     #[test]
@@ -166,8 +183,9 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
+        let count = TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
         dir.push(format!(
-            "logbook{}editor-{}-{stamp}",
+            "logbook{}editor-{}-{stamp}-{count}",
             if path_has_spaces { " " } else { "-" },
             std::process::id()
         ));
@@ -175,12 +193,12 @@ mod tests {
         let mut p = dir;
         #[cfg(unix)]
         p.push(format!(
-            "logbook-fake-editor-{}-{stamp}.sh",
+            "logbook-fake-editor-{}-{stamp}-{count}.sh",
             std::process::id()
         ));
         #[cfg(windows)]
         p.push(format!(
-            "logbook-fake-editor-{}-{stamp}.cmd",
+            "logbook-fake-editor-{}-{stamp}-{count}.cmd",
             std::process::id()
         ));
         #[cfg(unix)]

@@ -39,6 +39,7 @@ proptest! {
         prop_assert_eq!(entry.rejected.as_deref(), rejected.as_deref());
         prop_assert_eq!(entry.risk.as_deref(), risk.as_deref());
         prop_assert_eq!(&entry.tags, &tags);
+        prop_assert!(entry.superseded_by.is_empty());
         prop_assert_eq!(&entry.raw, block.trim_end());
     }
 }

@@ -27,6 +27,26 @@ pub enum Error {
     #[error("git command failed: {0}")]
     Git(String),
 
+    /// Another process held the append lock for too long.
+    #[error("timed out waiting for the logbook write lock at {0}")]
+    Locked(PathBuf),
+
+    /// User input would produce a malformed canonical entry.
+    #[error("invalid entry: {0}")]
+    InvalidEntry(String),
+
+    /// Reading a piped decision reason failed.
+    #[error("failed to read why text from stdin: {0}")]
+    Stdin(#[source] std::io::Error),
+
+    /// Writing command output failed.
+    #[error("failed to write command output: {0}")]
+    Output(#[source] std::io::Error),
+
+    /// A source logbook failed structural validation.
+    #[error("logbook check failed with {0} problem(s)")]
+    CheckFailed(usize),
+
     /// Neither `$EDITOR` nor `$VISUAL` is configured.
     #[error("no editor configured — set $EDITOR or $VISUAL, or pass --why directly")]
     NoEditor,
@@ -50,6 +70,14 @@ pub enum Error {
     /// No entry on a date has the supplied title.
     #[error("no entry dated {date} has title \"{title}\"")]
     SupersedeTitleMissing { date: String, title: String },
+
+    /// The selected decision already has a successor.
+    #[error("cannot supersede {0}: it is already superseded")]
+    SupersedeTargetInactive(String),
+
+    /// A dated title would duplicate an existing decision reference.
+    #[error("a decision already exists at {0}")]
+    DuplicateDecision(String),
 }
 
 /// Result type used throughout logbook.

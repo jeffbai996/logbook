@@ -4,6 +4,58 @@ Notable changes to `logbook` are recorded here.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-29
+
+### Added
+
+- Repository-aware discovery finds the nearest `logbook.md` from nested
+  directories without crossing the current Git root. Global `--file PATH`
+  overrides discovery and `LOGBOOK_FILE`.
+- Shared `--tag`, `--since`, `--until`, `--active`, and `--limit` filters for
+  `list`, `search`, and `export`; `list` and `export` also accept `--search`.
+  Repeated tags match entries containing every supplied tag.
+- `trace` prints an entire supersession chain in either direction, while
+  `show --title` disambiguates same-day decisions.
+- `check` validates required fields, real calendar dates, duplicate decision
+  references, and missing, ambiguous, or branched supersession links.
+- JSON Lines export via `export --format jsonl`. JSON records now include
+  derived `active` and `superseded_by` fields.
+- `--why -` reads a reason from stdin, `--date` records imported decisions,
+  `init --stage` stages a new logbook, and `supersede --print` echoes its entry.
+- GitHub release archives now include a generated `SHA256SUMS` file.
+
+### Changed
+
+- Multiline `why`, `rejected`, and `risk` fields now round-trip through parsing
+  and machine export instead of retaining only their first line.
+- CLI date arguments reject impossible calendar dates, titles and tags reject
+  ambiguous line-breaking characters, duplicate tags are folded, and empty
+  stdin reasons abort without writing. New entries reject duplicate dated
+  titles, and `supersede` refuses to branch an already-superseded decision.
+- `stats` reports active and superseded counts. Bounded machine exports remain
+  in document order; human reads remain newest-first.
+- Version 0.5 marks the intended feature-complete surface. Maintenance,
+  portability fixes, and dependency upkeep continue without a broader roadmap.
+- GitHub workflows use the current Node 24 action majors, including strict
+  artifact digest verification during release assembly.
+
+### Fixed
+
+- Concurrent appenders now serialize around the full read-copy-rename cycle,
+  preventing the last writer from silently discarding another complete entry.
+- Atomic appends now report temp-file synchronization failures instead of
+  continuing to rename data that was not confirmed durable.
+- Parallel editor captures use collision-proof temp names instead of relying
+  on wall-clock resolution, eliminating intermittent cross-test and real-use
+  contamination.
+- Initialization uses create-new semantics and cannot truncate a file created
+  by a racing process.
+- The release workflow collects all six builds before one job updates the
+  GitHub Release, preventing every matrix worker from duplicating release notes.
+- Closing a downstream stdout pipe early no longer panics the CLI; commands
+  now exit cleanly in pipelines such as `logbook list | head`, and write/stage
+  side effects finish before success output can be closed.
+
 ## [0.4.0] - 2026-08-10
 
 ### Added
@@ -95,7 +147,8 @@ Notable changes to `logbook` are recorded here.
 - Initial CLI, tags, filters, atomic writes, `LOGBOOK_FILE`, and utility
   commands across the 0.0.x prototypes.
 
-[Unreleased]: https://github.com/jeffbai996/logbook/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/jeffbai996/logbook/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/jeffbai996/logbook/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/jeffbai996/logbook/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/jeffbai996/logbook/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/jeffbai996/logbook/compare/v0.2.0...v0.2.1
