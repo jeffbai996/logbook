@@ -53,3 +53,30 @@ Newest entries at the bottom. Generated and maintained by `logbook` — https://
 **risk:** older supersession entries remain date-only; the supported Rust floor rises to 1.85
 **tags:** release, scope, maintenance
 
+## 2026-08-29 — serialize concurrent appends with a filesystem lock
+**why:** atomic replacement prevents partial files but does not stop two writers from copying the same old contents and the later rename discarding one complete append
+**supersedes:** 2026-05-15 — 0.0.3 — atomic writes, LOGBOOK_FILE env var, --since/--until, --print, where
+**rejected:** continuing to treat atomic rename as mutual exclusion; adding an OS-specific advisory-lock dependency
+**risk:** a crashed writer can delay another append until the 30-second stale-lock recovery
+**tags:** robustness, filesystem
+
+## 2026-08-29 — ship crates.io plus checksummed prebuilt archives
+**why:** cargo install and six cross-platform release archives are the maintained installation paths, and one checksum manifest makes direct downloads verifiable
+**supersedes:** 2026-05-16 — 0.2.0 — distribution: crates.io, prebuilt binaries, homebrew tap
+**rejected:** reviving the retired Homebrew tap; adding more package-manager repositories without evidence of demand
+**risk:** release archives remain unsigned and platform trust prompts may still require an explicit user override
+**tags:** release, distribution
+
+## 2026-08-29 — freeze the intended product surface at 0.5
+**why:** repository discovery, robust authoring, composable retrieval, validation, supersession tracing, machine export, cross-platform packaging, and checksums now cover the complete local decision-log workflow
+**rejected:** continuing a feature roadmap; hosted sync, plugins, semantic search, automatic extraction, or a service
+**risk:** future features need evidence of a missing core workflow; maintenance and portability work continue
+**tags:** release, scope, maintenance
+
+## 2026-08-29 — test durable contracts without snapshot ceremony
+**why:** focused parser, renderer, filesystem, CLI, and property tests catch the real regressions while exact-output snapshots duplicated assertions and encouraged mechanical churn
+**supersedes:** 2026-05-16 — 0.1.1 — proof and polish patch: property/snapshot tests, full rustdoc, public-first README
+**rejected:** restoring snapshots for a small deterministic renderer; documenting every public item when the prose only repeats its signature
+**risk:** stable human and JSON output still need explicit contract tests when a change can affect users
+**tags:** tests, maintenance
+
