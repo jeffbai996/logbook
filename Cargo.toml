@@ -1,6 +1,6 @@
 [package]
 name = "logbook"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 rust-version = "1.85"
 authors = ["Jeff Bai"]
@@ -23,6 +23,7 @@ include = [
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
+clap_complete = "4.5"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 thiserror = "2.0"
 

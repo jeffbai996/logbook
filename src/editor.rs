@@ -240,10 +240,11 @@ mod tests {
     #[test]
     fn capture_with_empty_result_is_empty_entry_error() {
         let ed = fake_editor_appending("# no user content\\n", false);
-        assert!(matches!(
-            capture_with(ed.to_str().unwrap(), WHY_TEMPLATE),
-            Err(Error::EmptyEntry)
-        ));
+        let result = capture_with(ed.to_str().unwrap(), WHY_TEMPLATE);
+        assert!(
+            matches!(&result, Err(Error::EmptyEntry)),
+            "unexpected editor result: {result:?}"
+        );
         std::fs::remove_dir_all(ed.parent().unwrap()).unwrap();
     }
 

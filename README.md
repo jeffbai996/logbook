@@ -91,12 +91,13 @@ tags stay single-line so the Markdown remains unambiguous.
 
 ## Retrieval
 
-`list`, `search`, and `export` share date, tag, active-state, and limit filters.
-Repeated tags are combined with AND:
+`list`, `search`, and `export` share date, tag, decision-state, and limit
+filters. Repeated tags are combined with AND:
 
 ```bash
 logbook list --tag storage --tag local --since 2026-01-01
 logbook list --search "write contention" --active --limit 20
+logbook list --superseded
 logbook search SQLite --tag storage --active
 
 logbook export --active --limit 10
@@ -132,12 +133,14 @@ Inspect a reversal in either direction with:
 
 ```bash
 logbook trace 2026-08-01 --title "use SQLite for local state"
+logbook trace 2026-08-01 --title "use SQLite for local state" --format json
 ```
 
-`list --active` excludes decisions that a valid later entry supersedes.
-`logbook check` exits nonzero for malformed dates, missing required fields,
-broken or ambiguous links, duplicate references, and branched supersessions;
-it is suitable for CI.
+`--active` and `--superseded` select either side of a reversal. `logbook check`
+exits nonzero for malformed dates, missing required fields, broken or ambiguous
+links, duplicate references, and branched supersessions. `check --format json`
+emits a stable report while preserving that exit status, making it suitable for
+CI and agents.
 
 ## Commands
 
@@ -150,12 +153,13 @@ it is suitable for CI.
 | `last` | Print the newest decision. |
 | `show <date> [--title T]` | Print decisions on a date. |
 | `supersede <date> <title> [options]` | Append a replacement decision. |
-| `trace <date> [--title T]` | Print a complete supersession chain. |
-| `check` | Validate the file and its decision graph. |
+| `trace <date> [--title T] [--format human|json]` | Print a complete supersession chain. |
+| `check [--format human|json]` | Validate the file and its decision graph. |
 | `export [--format json|jsonl] [filters]` | Emit stable machine-readable records. |
 | `tags` | List normalized tags and counts. |
 | `stats` | Summarize total, active, superseded, date, and tag counts. |
 | `where` | Print the resolved path. |
+| `completions <shell>` | Generate a shell completion script. |
 
 Use `logbook <command> --help` for every option.
 
@@ -166,6 +170,7 @@ Agents need bounded current context, not a ceremonial document dump:
 ```bash
 logbook list --active --limit 10
 logbook export --active --limit 10
+logbook check --format json
 ```
 
 A useful repository instruction is:
@@ -202,7 +207,7 @@ changed decisions should normally be superseded rather than rewritten. Writes
 use an adjacent atomic replacement and a short-lived cross-process lock, so a
 crash cannot leave a partial entry and concurrent writers do not lose one.
 
-Version 0.5 is feature-complete for the intended product. The project is in
+Version 0.5.1 is feature-complete for the intended product. The project is in
 maintenance mode: bug fixes, portability work, and dependency upkeep remain
 welcome; no broader feature roadmap is planned.
 

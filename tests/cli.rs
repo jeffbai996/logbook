@@ -986,6 +986,28 @@ fn list_active_and_composable_filters_find_current_decisions() {
 }
 
 #[test]
+fn superseded_filter_selects_only_replaced_decisions() {
+    let sb = Sandbox::new();
+    sb.seed(
+        "## 2026-01-01 — old storage\n**why:** sqlite\n\n\
+         ## 2026-02-01 — new storage\n**why:** postgres\n**supersedes:** 2026-01-01 — old storage\n",
+    );
+
+    sb.cmd()
+        .args(["list", "--superseded"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("old storage"))
+        .stdout(predicate::str::contains("new storage").not());
+    sb.cmd()
+        .args(["export", "--superseded"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"title\": \"old storage\""))
+        .stdout(predicate::str::contains("\"active\": false"));
+}
+
+#[test]
 fn export_filters_recent_matches_and_supports_json_lines() {
     let sb = Sandbox::new();
     sb.seed(
@@ -1034,6 +1056,31 @@ fn trace_prints_the_complete_supersession_chain() {
 }
 
 #[test]
+fn trace_json_returns_the_complete_chain_in_decision_order() {
+    let sb = Sandbox::new();
+    sb.seed(
+        "## 2026-01-01 — first\n**why:** a\n\n\
+         ## 2026-02-01 — second\n**why:** b\n**supersedes:** 2026-01-01 — first\n\n\
+         ## 2026-03-01 — third\n**why:** c\n**supersedes:** 2026-02-01 — second\n",
+    );
+    let output = sb
+        .cmd()
+        .args(["trace", "2026-02-01", "--format", "json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let output = String::from_utf8(output).unwrap();
+    let first = output.find("\"title\": \"first\"").unwrap();
+    let second = output.find("\"title\": \"second\"").unwrap();
+    let third = output.find("\"title\": \"third\"").unwrap();
+    assert!(first < second && second < third);
+    assert!(output.contains("\"active\": false"));
+    assert!(output.contains("\"active\": true"));
+}
+
+#[test]
 fn check_reports_all_structural_problems_and_accepts_valid_files() {
     let sb = Sandbox::new();
     sb.seed("## 2026-02-30 — broken\n**why:**\n**supersedes:** 1999-01-01 — absent\n");
@@ -1053,6 +1100,45 @@ fn check_reports_all_structural_problems_and_accepts_valid_files() {
         .assert()
         .success()
         .stdout(predicate::str::contains("1 entries (1 active"));
+}
+
+#[test]
+fn check_json_reports_machine_readable_success_and_failure() {
+    let sb = Sandbox::new();
+    sb.seed("## 2026-02-30 — broken\n**why:**\n");
+    sb.cmd()
+        .args(["check", "--format", "json"])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("\"valid\": false"))
+        .stdout(predicate::str::contains("\"entry\": 1"))
+        .stdout(predicate::str::contains("invalid calendar date"))
+        .stderr(predicate::str::contains("invalid calendar date").not());
+
+    sb.seed("## 2026-02-28 — sound\n**why:** valid\n");
+    sb.cmd()
+        .args(["check", "--format", "json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"valid\": true"))
+        .stdout(predicate::str::contains("\"entries\": 1"))
+        .stdout(predicate::str::contains("\"issues\": []"));
+}
+
+#[test]
+fn completions_generates_scripts_without_a_logbook() {
+    let sb = Sandbox::new();
+    sb.cmd()
+        .args(["completions", "bash"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("_logbook()"))
+        .stdout(predicate::str::contains("completions"));
+    sb.cmd()
+        .args(["completions", "powershell"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Register-ArgumentCompleter"));
 }
 
 #[test]

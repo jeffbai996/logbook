@@ -80,3 +80,9 @@ Newest entries at the bottom. Generated and maintained by `logbook` — https://
 **risk:** stable human and JSON output still need explicit contract tests when a change can affect users
 **tags:** tests, maintenance
 
+## 2026-08-29 — finalize inspection ergonomics and freeze at 0.5.1
+**why:** superseded-only retrieval, JSON validation and tracing, and generated shell completions close the remaining friction for regular terminal, CI, and coding-agent use without changing the one-file model
+**supersedes:** 2026-08-29 — freeze the intended product surface at 0.5
+**rejected:** config files, quiet-mode aliases for shell redirection, a generic output framework, or any service-backed integration
+**risk:** shell completion generation adds one small dependency that shares clap's Rust 1.85 floor; future releases now require evidence of a broken core workflow
+**tags:** release, scope, agents, maintenance
