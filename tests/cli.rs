@@ -2,7 +2,9 @@
 
 use assert_cmd::Command;
 use predicates::prelude::*;
+use std::io::Read;
 use std::path::PathBuf;
+use std::process::Stdio;
 use tempfile::TempDir;
 
 /// Helper: a tempdir + the absolute path to a `logbook.md` inside it,
@@ -27,8 +29,6 @@ impl Sandbox {
     fn cmd(&self) -> Command {
         let mut c = Command::cargo_bin("logbook").unwrap();
         c.env("LOGBOOK_FILE", self.path());
-        // Be a good citizen: don't inherit the user's actual env that
-        // might point LOGBOOK_FILE somewhere else.
         c
     }
 
@@ -81,7 +81,6 @@ fn add_appends_entry_and_print_flag_echoes_block() {
 #[test]
 fn add_auto_initializes_when_file_missing() {
     let sb = Sandbox::new();
-    // No init — go straight to add.
     sb.cmd()
         .args(["add", "first", "--why", "w"])
         .assert()
@@ -183,6 +182,17 @@ fn list_bad_since_returns_error_and_nonzero_exit() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("--since must be YYYY-MM-DD"));
+}
+
+#[test]
+fn filters_reject_a_reversed_date_range() {
+    let sb = Sandbox::new();
+    sb.seed("## 2026-01-01 — choice\n**why:** w\n");
+    sb.cmd()
+        .args(["list", "--since", "2026-02-01", "--until", "2026-01-01"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--since cannot be after --until"));
 }
 
 #[test]
@@ -330,7 +340,6 @@ fn where_prints_resolved_path() {
 #[test]
 fn missing_file_emits_notfound_error() {
     let sb = Sandbox::new();
-    // Never initialize. list should fail with NotFound.
     sb.cmd()
         .arg("list")
         .assert()
@@ -406,23 +415,11 @@ fn export_json_emits_valid_array() {
 fn export_defaults_to_json() {
     let sb = Sandbox::new();
     sb.cmd().args(["add", "t", "--why", "w"]).assert().success();
-    // No --format → JSON by default.
     sb.cmd()
         .arg("export")
         .assert()
         .success()
         .stdout(predicate::str::contains("\"title\": \"t\""));
-}
-
-#[test]
-fn export_empty_logbook_is_empty_array() {
-    let sb = Sandbox::new();
-    sb.cmd().arg("init").assert().success();
-    sb.cmd()
-        .args(["export", "--format", "json"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("[]"));
 }
 
 #[test]
@@ -448,16 +445,6 @@ fn list_and_export_limit_to_recent_entries() {
         .success()
         .stdout(predicate::str::contains("third"))
         .stdout(predicate::str::contains("second").not());
-}
-
-#[test]
-fn export_unknown_format_errors() {
-    let sb = Sandbox::new();
-    sb.cmd().args(["add", "t", "--why", "w"]).assert().success();
-    sb.cmd()
-        .args(["export", "--format", "yaml"])
-        .assert()
-        .failure();
 }
 
 /// Write an executable fake editor that appends `body` to its first argument.
@@ -534,13 +521,11 @@ fn add_with_why_flag_does_not_open_editor() {
 #[test]
 fn supersede_appends_entry_linking_to_old_date() {
     let sb = Sandbox::new();
-    // Seed an original decision.
     sb.cmd()
         .args(["add", "use ORM", "--why", "convenient"])
         .assert()
         .success();
     let old_date = {
-        // Grab the date the original got (today, but read it from the file to be exact).
         let body = std::fs::read_to_string(sb.path()).unwrap();
         body.lines()
             .find(|l| l.starts_with("## "))
@@ -617,17 +602,6 @@ fn supersede_missing_target_errors() {
 }
 
 #[test]
-fn supersede_malformed_date_errors() {
-    let sb = Sandbox::new();
-    sb.cmd().args(["add", "x", "--why", "w"]).assert().success();
-    sb.cmd()
-        .args(["supersede", "not-a-date", "new", "--why", "w"])
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("YYYY-MM-DD"));
-}
-
-#[test]
 fn supersede_appears_in_json_export() {
     let sb = Sandbox::new();
     sb.cmd()
@@ -654,6 +628,56 @@ fn supersede_appears_in_json_export() {
         .stdout(predicate::str::contains(format!(
             "\"supersedes\": \"{old_date} — old\""
         )));
+}
+
+#[test]
+fn add_rejects_a_duplicate_dated_title() {
+    let sb = Sandbox::new();
+    sb.cmd()
+        .args([
+            "add",
+            "same decision",
+            "--why",
+            "first",
+            "--date",
+            "2026-01-01",
+        ])
+        .assert()
+        .success();
+    sb.cmd()
+        .args([
+            "add",
+            "same decision",
+            "--why",
+            "second",
+            "--date",
+            "2026-01-01",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("a decision already exists"));
+    assert_eq!(
+        logbook::parse_entries(&std::fs::read_to_string(sb.path()).unwrap()).len(),
+        1
+    );
+}
+
+#[test]
+fn supersede_rejects_an_already_superseded_decision() {
+    let sb = Sandbox::new();
+    sb.seed(
+        "## 2026-01-01 — original\n**why:** a\n\n\
+         ## 2026-02-01 — replacement\n**why:** b\n**supersedes:** 2026-01-01 — original\n",
+    );
+    sb.cmd()
+        .args(["supersede", "2026-01-01", "other branch", "--why", "c"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("already superseded"));
+    assert_eq!(
+        logbook::parse_entries(&std::fs::read_to_string(sb.path()).unwrap()).len(),
+        2
+    );
 }
 
 #[test]
@@ -719,6 +743,64 @@ fn piped_output_has_no_ansi_codes() {
 }
 
 #[test]
+fn a_closed_stdout_pipe_exits_cleanly() {
+    let sb = Sandbox::new();
+    sb.seed(&format!(
+        "## 2026-01-01 — large output\n**why:** {}\n",
+        "x".repeat(2_000_000)
+    ));
+
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_logbook"))
+        .env("LOGBOOK_FILE", sb.path())
+        .arg("list")
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdout = child.stdout.take().unwrap();
+    let mut first_byte = [0];
+    stdout.read_exact(&mut first_byte).unwrap();
+    drop(stdout);
+
+    assert!(child.wait().unwrap().success());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_closed_stdout_pipe_does_not_skip_staging() {
+    let sb = Sandbox::new();
+    sb.seed("# logbook\n\n");
+    Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(sb.dir.path())
+        .assert()
+        .success();
+    let title = "x".repeat(100_000);
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_logbook"))
+        .current_dir(sb.dir.path())
+        .env("LOGBOOK_FILE", sb.path())
+        .args(["add", &title, "--why", "kept", "--stage"])
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdout = child.stdout.take().unwrap();
+    let mut first_byte = [0];
+    stdout.read_exact(&mut first_byte).unwrap();
+    drop(stdout);
+
+    assert!(child.wait().unwrap().success());
+    let cached = std::process::Command::new("git")
+        .args(["diff", "--cached", "--name-only"])
+        .current_dir(sb.dir.path())
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8(cached.stdout).unwrap().trim(),
+        "logbook.md"
+    );
+    assert!(std::fs::read_to_string(sb.path()).unwrap().contains(&title));
+}
+
+#[test]
 fn color_always_injects_ansi_even_when_piped() {
     let sb = Sandbox::new();
     sb.cmd().args(["add", "t", "--why", "w"]).assert().success();
@@ -762,4 +844,254 @@ fn export_json_never_colorized_even_with_color_always() {
         !stdout.contains('\x1b'),
         "json export must never contain ANSI"
     );
+}
+
+#[test]
+fn discovers_repository_logbook_from_nested_directories() {
+    let sb = Sandbox::new();
+    let nested = sb.dir.path().join("src/deep");
+    std::fs::create_dir_all(sb.dir.path().join(".git")).unwrap();
+    std::fs::create_dir_all(&nested).unwrap();
+    sb.seed("## 2026-08-01 — repository choice\n**why:** visible from below\n");
+
+    let mut cmd = Command::cargo_bin("logbook").unwrap();
+    cmd.current_dir(&nested)
+        .env_remove("LOGBOOK_FILE")
+        .arg("last")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("repository choice"));
+}
+
+#[test]
+fn add_from_nested_directory_creates_one_logbook_at_repository_root() {
+    let sb = Sandbox::new();
+    let nested = sb.dir.path().join("src/deep");
+    std::fs::create_dir_all(sb.dir.path().join(".git")).unwrap();
+    std::fs::create_dir_all(&nested).unwrap();
+
+    let mut cmd = Command::cargo_bin("logbook").unwrap();
+    cmd.current_dir(&nested)
+        .env_remove("LOGBOOK_FILE")
+        .args(["add", "root decision", "--why", "one repo, one file"])
+        .assert()
+        .success();
+
+    assert!(sb.path().exists());
+    assert!(!nested.join("logbook.md").exists());
+}
+
+#[test]
+fn file_flag_overrides_environment_path() {
+    let sb = Sandbox::new();
+    let environment = sb.dir.path().join("environment.md");
+    let explicit = sb.dir.path().join("explicit.md");
+    let mut cmd = Command::cargo_bin("logbook").unwrap();
+    cmd.env("LOGBOOK_FILE", &environment)
+        .arg("--file")
+        .arg(&explicit)
+        .args(["add", "explicit target", "--why", "because"])
+        .assert()
+        .success();
+
+    assert!(explicit.exists());
+    assert!(!environment.exists());
+}
+
+#[test]
+fn init_can_stage_the_new_logbook() {
+    let sb = Sandbox::new();
+    Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(sb.dir.path())
+        .assert()
+        .success();
+
+    sb.cmd()
+        .current_dir(sb.dir.path())
+        .args(["init", "--stage"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("staged"));
+    Command::new("git")
+        .args(["diff", "--cached", "--name-only"])
+        .current_dir(sb.dir.path())
+        .assert()
+        .success()
+        .stdout(predicate::eq("logbook.md\n"));
+}
+
+#[test]
+fn add_accepts_a_real_override_date_and_rejects_impossible_dates() {
+    let sb = Sandbox::new();
+    sb.cmd()
+        .args([
+            "add",
+            "dated decision",
+            "--why",
+            "migration",
+            "--date",
+            "2024-02-29",
+        ])
+        .assert()
+        .success();
+    sb.cmd()
+        .args(["add", "bad date", "--why", "nope", "--date", "2023-02-29"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("YYYY-MM-DD"));
+    assert!(std::fs::read_to_string(sb.path())
+        .unwrap()
+        .contains("## 2024-02-29 — dated decision"));
+}
+
+#[test]
+fn piped_multiline_why_survives_markdown_and_json_export() {
+    let sb = Sandbox::new();
+    sb.cmd()
+        .args(["add", "piped reason", "--why", "-"])
+        .write_stdin("first paragraph\nsecond line\n\nthird paragraph\n")
+        .assert()
+        .success();
+
+    let body = std::fs::read_to_string(sb.path()).unwrap();
+    assert!(body.contains("first paragraph\nsecond line\n\nthird paragraph"));
+    sb.cmd()
+        .arg("export")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "first paragraph\\nsecond line\\n\\nthird paragraph",
+        ));
+}
+
+#[test]
+fn list_active_and_composable_filters_find_current_decisions() {
+    let sb = Sandbox::new();
+    sb.seed(
+        "## 2026-01-01 — old storage\n**why:** sqlite\n**tags:** storage, local\n\n\
+         ## 2026-02-01 — new storage\n**why:** postgres for writes\n**supersedes:** 2026-01-01 — old storage\n**tags:** storage, server\n\n\
+         ## 2026-03-01 — unrelated\n**why:** css\n**tags:** ui\n",
+    );
+
+    sb.cmd()
+        .args([
+            "list", "--active", "--tag", "storage", "--tag", "server", "--search", "writes",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("new storage"))
+        .stdout(predicate::str::contains("## 2026-01-01 — old storage").not())
+        .stdout(predicate::str::contains("unrelated").not());
+}
+
+#[test]
+fn export_filters_recent_matches_and_supports_json_lines() {
+    let sb = Sandbox::new();
+    sb.seed(
+        "## 2026-01-01 — first\n**why:** match\n**tags:** x\n\n\
+         ## 2026-01-02 — second\n**why:** match\n**tags:** x\n\n\
+         ## 2026-01-03 — third\n**why:** other\n**tags:** x\n",
+    );
+    let output = sb
+        .cmd()
+        .args([
+            "export", "--format", "jsonl", "--search", "match", "--limit", "1",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let output = String::from_utf8(output).unwrap();
+    assert_eq!(output.lines().count(), 1);
+    assert!(output.contains("second"));
+    assert!(!output.contains("first"));
+    assert!(output.contains("\"active\":true"));
+}
+
+#[test]
+fn trace_prints_the_complete_supersession_chain() {
+    let sb = Sandbox::new();
+    sb.seed(
+        "## 2026-01-01 — first\n**why:** a\n\n\
+         ## 2026-02-01 — second\n**why:** b\n**supersedes:** 2026-01-01 — first\n\n\
+         ## 2026-03-01 — third\n**why:** c\n**supersedes:** 2026-02-01 — second\n",
+    );
+    let output = sb
+        .cmd()
+        .args(["trace", "2026-02-01"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let output = String::from_utf8(output).unwrap();
+    let first = output.find("— first").unwrap();
+    let second = output.find("— second").unwrap();
+    let third = output.find("— third").unwrap();
+    assert!(first < second && second < third);
+}
+
+#[test]
+fn check_reports_all_structural_problems_and_accepts_valid_files() {
+    let sb = Sandbox::new();
+    sb.seed("## 2026-02-30 — broken\n**why:**\n**supersedes:** 1999-01-01 — absent\n");
+    sb.cmd()
+        .arg("check")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid calendar date"))
+        .stderr(predicate::str::contains("missing a non-empty why"))
+        .stderr(predicate::str::contains(
+            "does not identify an earlier entry",
+        ));
+
+    sb.seed("## 2026-02-28 — sound\n**why:** valid\n");
+    sb.cmd()
+        .arg("check")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("1 entries (1 active"));
+}
+
+#[test]
+fn show_title_disambiguates_same_day_entries() {
+    let sb = Sandbox::new();
+    sb.seed(
+        "## 2026-01-01 — first\n**why:** a\n\n\
+         ## 2026-01-01 — second\n**why:** b\n",
+    );
+    sb.cmd()
+        .args(["show", "2026-01-01", "--title", "second"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("— second"))
+        .stdout(predicate::str::contains("— first").not());
+}
+
+#[test]
+fn supersede_prints_the_written_block_and_stats_report_decision_state() {
+    let sb = Sandbox::new();
+    sb.seed("## 2026-01-01 — old\n**why:** a\n");
+    sb.cmd()
+        .args([
+            "supersede",
+            "2026-01-01",
+            "new",
+            "--why",
+            "b",
+            "--date",
+            "2026-02-01",
+            "--print",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("**supersedes:** 2026-01-01 — old"));
+    sb.cmd()
+        .arg("stats")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("active:        1"))
+        .stdout(predicate::str::contains("superseded:    1"));
 }

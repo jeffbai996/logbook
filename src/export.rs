@@ -34,7 +34,12 @@ pub fn entries_to_json(entries: &[Entry]) -> String {
             "    \"supersedes\": {},\n",
             opt_str(entry.supersedes.as_deref())
         ));
-        out.push_str(&format!("    \"tags\": {}\n", str_array(&entry.tags)));
+        out.push_str(&format!("    \"tags\": {},\n", str_array(&entry.tags)));
+        out.push_str(&format!("    \"active\": {},\n", entry.is_active()));
+        out.push_str(&format!(
+            "    \"superseded_by\": {}\n",
+            str_array(&entry.superseded_by)
+        ));
         out.push_str("  }");
         if i + 1 < entries.len() {
             out.push(',');
@@ -43,6 +48,28 @@ pub fn entries_to_json(entries: &[Entry]) -> String {
     }
     out.push(']');
     out
+}
+
+/// Render one compact JSON object per line in document order.
+pub fn entries_to_json_lines(entries: &[Entry]) -> String {
+    entries
+        .iter()
+        .map(|entry| {
+            format!(
+                "{{\"date\":{},\"title\":{},\"why\":{},\"rejected\":{},\"risk\":{},\"supersedes\":{},\"tags\":{},\"active\":{},\"superseded_by\":{}}}",
+                opt_str(entry.date.as_deref()),
+                opt_str(entry.title.as_deref()),
+                opt_str(entry.why.as_deref()),
+                opt_str(entry.rejected.as_deref()),
+                opt_str(entry.risk.as_deref()),
+                opt_str(entry.supersedes.as_deref()),
+                compact_str_array(&entry.tags),
+                entry.is_active(),
+                compact_str_array(&entry.superseded_by),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn opt_str(value: Option<&str>) -> String {
@@ -63,6 +90,17 @@ fn str_array(items: &[String]) -> String {
     }
     out.push_str("    ]");
     out
+}
+
+fn compact_str_array(items: &[String]) -> String {
+    format!(
+        "[{}]",
+        items
+            .iter()
+            .map(|item| json_string(item))
+            .collect::<Vec<_>>()
+            .join(",")
+    )
 }
 
 fn json_string(value: &str) -> String {
@@ -110,6 +148,8 @@ mod tests {
             "\"risk\": \"migrations\"",
             "\"db\"",
             "\"perf\"",
+            "\"active\": true",
+            "\"superseded_by\": []",
         ] {
             assert!(json.contains(expected), "{expected}");
         }
@@ -130,5 +170,17 @@ mod tests {
             json_string("\"\\\n\r\t\u{08}\u{0C}\u{01}"),
             "\"\\\"\\\\\\n\\r\\t\\b\\f\\u0001\""
         );
+    }
+
+    #[test]
+    fn json_lines_are_compact_and_include_derived_state() {
+        let entries = parse_entries(
+            "## 2026-01-01 — old\n**why:** a\n\n\
+             ## 2026-01-02 — new\n**why:** b\n**supersedes:** 2026-01-01 — old\n",
+        );
+        let lines = entries_to_json_lines(&entries);
+        assert_eq!(lines.lines().count(), 2);
+        assert!(lines.lines().next().unwrap().contains("\"active\":false"));
+        assert!(lines.contains("\"superseded_by\":[\"2026-01-02 — new\"]"));
     }
 }

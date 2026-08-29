@@ -1,22 +1,59 @@
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use logbook::{
-    atomic_append, entries_to_json, init_file, is_date_shaped, logbook_path, parse_entries,
-    read_text, render_entry_block, today, Entry, Error, RenderInput, Result, ENV_VAR,
+    atomic_append, entries_to_json, entries_to_json_lines, init_file, is_valid_date, parse_entries,
+    read_text, render_entry_block, resolve_logbook_path, today, validate_entries, Entry, Error,
+    RenderInput, Result, ENV_VAR,
 };
 use std::collections::BTreeMap;
+use std::io::{Read, Write};
 use std::num::NonZeroUsize;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
+
+macro_rules! out {
+    ($($argument:tt)*) => {
+        write_stdout(format_args!($($argument)*))
+    };
+}
+
+macro_rules! outln {
+    ($($argument:tt)*) => {
+        write_stdout_line(format_args!($($argument)*))
+    };
+}
 
 #[derive(Parser)]
 #[command(name = "logbook", version, about = "Per-repo decision log CLI", long_about = None)]
 struct Cli {
-    /// When to colorize human-facing output (list/last/show/search)
+    /// When to colorize human-facing entry output
     #[arg(long, value_enum, default_value_t = ColorArg::Auto, global = true)]
     color: ColorArg,
 
+    /// Use this file instead of discovering logbook.md (overrides LOGBOOK_FILE)
+    #[arg(long, global = true, value_name = "PATH")]
+    file: Option<PathBuf>,
+
     #[command(subcommand)]
     cmd: Cmd,
+}
+
+#[derive(Args, Clone, Default)]
+struct FilterArgs {
+    /// Match every supplied tag case-insensitively (repeatable)
+    #[arg(long = "tag", value_name = "TAG")]
+    tags: Vec<String>,
+    /// Include entries on or after this date
+    #[arg(long)]
+    since: Option<String>,
+    /// Include entries on or before this date
+    #[arg(long)]
+    until: Option<String>,
+    /// Include only decisions not superseded by a later entry
+    #[arg(long)]
+    active: bool,
+    /// Stop after this many matching recent entries
+    #[arg(long, value_name = "N")]
+    limit: Option<NonZeroUsize>,
 }
 
 #[derive(Clone, Copy, clap::ValueEnum)]
@@ -41,8 +78,12 @@ impl From<ColorArg> for logbook::ColorChoice {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Create the logbook file at the current directory if it doesn't exist
-    Init,
+    /// Create the resolved logbook file if it doesn't exist
+    Init {
+        /// Also run `git add <logbook>` after creating it
+        #[arg(long)]
+        stage: bool,
+    },
 
     /// Append a new entry
     Add {
@@ -51,6 +92,9 @@ enum Cmd {
         /// The reason for the decision. If omitted, opens $EDITOR to compose it.
         #[arg(long)]
         why: Option<String>,
+        /// Entry date instead of today (YYYY-MM-DD)
+        #[arg(long)]
+        date: Option<String>,
         /// Alternatives considered and why they were rejected
         #[arg(long)]
         rejected: Option<String>,
@@ -70,28 +114,41 @@ enum Cmd {
 
     /// Print entries, newest first, with optional filters
     List {
-        /// Match a tag case-insensitively
-        #[arg(long)]
-        tag: Option<String>,
-        /// Include entries on or after this date
-        #[arg(long)]
-        since: Option<String>,
-        /// Include entries on or before this date
-        #[arg(long)]
-        until: Option<String>,
-        /// Stop after this many matching entries
-        #[arg(long, value_name = "N")]
-        limit: Option<NonZeroUsize>,
+        /// Case-insensitive text search within matching entries
+        #[arg(long, value_name = "TERM")]
+        search: Option<String>,
+        #[command(flatten)]
+        filters: FilterArgs,
     },
 
     /// Case-insensitive search across entries
-    Search { term: String },
+    Search {
+        term: String,
+        #[command(flatten)]
+        filters: FilterArgs,
+    },
 
     /// Print only the most recent entry
     Last,
 
     /// Print all entries from a given date (YYYY-MM-DD)
-    Show { date: String },
+    Show {
+        date: String,
+        /// Match one exact title when several decisions share the date
+        #[arg(long)]
+        title: Option<String>,
+    },
+
+    /// Print the complete backward and forward supersession chain
+    Trace {
+        date: String,
+        /// Exact title of the decision to trace
+        #[arg(long)]
+        title: Option<String>,
+    },
+
+    /// Validate required fields, dates, and supersession links
+    Check,
 
     /// List all distinct tags with usage counts
     Tags,
@@ -102,14 +159,16 @@ enum Cmd {
     /// Print the resolved logbook file path (honors LOGBOOK_FILE)
     Where,
 
-    /// Export entries as structured data (currently JSON)
+    /// Export entries as structured data
     Export {
         /// Output format
         #[arg(long, value_enum, default_value_t = ExportFormat::Json)]
         format: ExportFormat,
-        /// Export only the N most recent entries
-        #[arg(long, value_name = "N")]
-        limit: Option<NonZeroUsize>,
+        /// Case-insensitive text search within matching entries
+        #[arg(long, value_name = "TERM")]
+        search: Option<String>,
+        #[command(flatten)]
+        filters: FilterArgs,
     },
 
     /// Append a new entry that formally supersedes an earlier one
@@ -121,6 +180,9 @@ enum Cmd {
         /// The reason for the change. If omitted, opens $EDITOR to compose it.
         #[arg(long)]
         why: Option<String>,
+        /// Date for the new decision instead of today (YYYY-MM-DD)
+        #[arg(long)]
+        date: Option<String>,
         /// Alternatives considered and why they were rejected
         #[arg(long)]
         rejected: Option<String>,
@@ -136,6 +198,9 @@ enum Cmd {
         /// Also run `git add <logbook>` after writing
         #[arg(long)]
         stage: bool,
+        /// Echo the rendered entry block to stdout after writing
+        #[arg(long)]
+        print: bool,
     },
 }
 
@@ -143,150 +208,260 @@ enum Cmd {
 enum ExportFormat {
     /// JSON array of entry objects
     Json,
+    /// One compact JSON object per line
+    Jsonl,
 }
 
-fn main() -> ExitCode {
-    let cli = Cli::parse();
-    // Resolve colorization once: the flag + live TTY/NO_COLOR state.
-    let colorize = logbook::should_colorize(
-        cli.color.into(),
-        std::io::IsTerminal::is_terminal(&std::io::stdout()),
-        std::env::var_os("NO_COLOR").is_some(),
-    );
-    match dispatch(cli.cmd, colorize) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(e) => {
-            eprintln!("error: {e}");
-            ExitCode::from(1)
-        }
-    }
-}
-
-/// Print an entry's raw block, colorized iff `colorize`. Trailing blank line
-/// matches the previous `println!("{}\n", raw)` spacing.
-fn emit(raw: &str, colorize: bool) {
-    if colorize {
-        println!("{}\n", logbook::colorize_block(raw));
-    } else {
-        println!("{raw}\n");
-    }
-}
-
-fn dispatch(cmd: Cmd, colorize: bool) -> Result<()> {
-    match cmd {
-        Cmd::Init => init(),
-        Cmd::Add {
-            title,
-            why,
-            rejected,
-            risk,
-            tags,
-            stage,
-            print,
-        } => add(title, why, rejected, risk, tags, stage, print),
-        Cmd::List {
-            tag,
-            since,
-            until,
-            limit,
-        } => list(
-            tag.as_deref(),
-            since.as_deref(),
-            until.as_deref(),
-            limit,
-            colorize,
-        ),
-        Cmd::Search { term } => search(&term, colorize),
-        Cmd::Last => last(colorize),
-        Cmd::Show { date } => show(&date, colorize),
-        Cmd::Tags => tags_cmd(),
-        Cmd::Stats => stats(),
-        Cmd::Where => print_where(),
-        Cmd::Export { format, limit } => export(format, limit),
-        Cmd::Supersede {
-            old_date,
-            title,
-            why,
-            rejected,
-            risk,
-            tags,
-            old_title,
-            stage,
-        } => supersede(old_date, old_title, title, why, rejected, risk, tags, stage),
-    }
-}
-
-fn init() -> Result<()> {
-    let path = logbook_path();
-    if init_file(&path)? {
-        println!("created {}", path.display());
-    } else {
-        println!("{} already exists, leaving it alone", path.display());
-    }
-    Ok(())
-}
-
-fn add(
+struct NewEntry {
     title: String,
     why: Option<String>,
+    date: Option<String>,
     rejected: Option<String>,
     risk: Option<String>,
     tags: Vec<String>,
     stage: bool,
     print: bool,
-) -> Result<()> {
-    // Resolve `why`: use the flag if given, otherwise open $EDITOR to compose it.
-    let why = match why {
-        Some(w) => w,
-        None => logbook::capture_via_editor()?,
-    };
+}
 
-    let path = logbook_path();
-    if init_file(&path)? {
-        println!("auto-created {}", path.display());
+fn main() -> ExitCode {
+    let cli = Cli::parse();
+    let colorize = logbook::should_colorize(
+        cli.color.into(),
+        std::io::IsTerminal::is_terminal(&std::io::stdout()),
+        std::env::var_os("NO_COLOR").is_some(),
+    );
+    let result = resolve_logbook_path(cli.file.as_deref())
+        .and_then(|path| dispatch(cli.cmd, &path, colorize));
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(Error::Output(error)) if error.kind() == std::io::ErrorKind::BrokenPipe => {
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            let _ = writeln!(std::io::stderr().lock(), "error: {e}");
+            ExitCode::from(1)
+        }
     }
+}
 
-    let date = today();
+fn write_stdout(arguments: std::fmt::Arguments<'_>) -> Result<()> {
+    std::io::stdout()
+        .lock()
+        .write_fmt(arguments)
+        .map_err(Error::Output)
+}
+
+fn write_stdout_line(arguments: std::fmt::Arguments<'_>) -> Result<()> {
+    let mut stdout = std::io::stdout().lock();
+    stdout
+        .write_fmt(arguments)
+        .and_then(|()| stdout.write_all(b"\n"))
+        .map_err(Error::Output)
+}
+
+/// Print an entry's raw block, colorized iff `colorize`.
+fn emit(raw: &str, colorize: bool) -> Result<()> {
+    if colorize {
+        outln!("{}\n", logbook::colorize_block(raw))
+    } else {
+        outln!("{raw}\n")
+    }
+}
+
+fn dispatch(cmd: Cmd, path: &Path, colorize: bool) -> Result<()> {
+    match cmd {
+        Cmd::Init { stage } => init(path, stage),
+        Cmd::Add {
+            title,
+            why,
+            date,
+            rejected,
+            risk,
+            tags,
+            stage,
+            print,
+        } => add(
+            path,
+            NewEntry {
+                title,
+                why,
+                date,
+                rejected,
+                risk,
+                tags,
+                stage,
+                print,
+            },
+        ),
+        Cmd::List { search, filters } => list(path, search.as_deref(), &filters, colorize, None),
+        Cmd::Search { term, filters } => list(path, Some(&term), &filters, colorize, Some(&term)),
+        Cmd::Last => last(path, colorize),
+        Cmd::Show { date, title } => show(path, &date, title.as_deref(), colorize),
+        Cmd::Trace { date, title } => trace(path, &date, title.as_deref(), colorize),
+        Cmd::Check => check(path),
+        Cmd::Tags => tags_cmd(path),
+        Cmd::Stats => stats(path),
+        Cmd::Where => print_where(path),
+        Cmd::Export {
+            format,
+            search,
+            filters,
+        } => export(path, format, search.as_deref(), &filters),
+        Cmd::Supersede {
+            old_date,
+            title,
+            why,
+            date,
+            rejected,
+            risk,
+            tags,
+            old_title,
+            stage,
+            print,
+        } => supersede(
+            path,
+            old_date,
+            old_title,
+            NewEntry {
+                title,
+                why,
+                date,
+                rejected,
+                risk,
+                tags,
+                stage,
+                print,
+            },
+        ),
+    }
+}
+
+fn init(path: &Path, stage: bool) -> Result<()> {
+    let created = init_file(path)?;
+    if stage && created {
+        git_add(path)?;
+    }
+    if created {
+        outln!("created {}", path.display())?;
+    } else {
+        outln!("{} already exists, leaving it alone", path.display())?;
+    }
+    if stage && created {
+        outln!("staged {}", path.display())?;
+    }
+    Ok(())
+}
+
+fn add(path: &Path, entry: NewEntry) -> Result<()> {
+    let title = validated_title(entry.title)?;
+    let date = validated_new_date(entry.date)?;
+    let tags = normalized_tags(entry.tags)?;
+    if path.exists() {
+        reject_duplicate_reference(&load_entries(path)?, &date, &title)?;
+    }
+    let why = resolve_why(entry.why)?;
+
+    let created = init_file(path)?;
+
     let block = render_entry_block(&RenderInput {
         date: &date,
         title: &title,
         why: &why,
-        rejected: rejected.as_deref(),
-        risk: risk.as_deref(),
+        rejected: entry.rejected.as_deref(),
+        risk: entry.risk.as_deref(),
         tags: &tags,
         supersedes: None,
     });
-    atomic_append(&path, &block)?;
-
-    println!("added: {date} — {title}");
-
-    if print {
-        println!("---");
-        print!("{block}");
+    atomic_append(path, &block)?;
+    if entry.stage {
+        git_add(path)?;
     }
 
-    if stage {
-        git_add(&path)?;
-        println!("staged {}", path.display());
+    if created {
+        outln!("auto-created {}", path.display())?;
+    }
+    outln!("added: {date} — {title}")?;
+
+    if entry.print {
+        outln!("---")?;
+        out!("{block}")?;
+    }
+
+    if entry.stage {
+        outln!("staged {}", path.display())?;
     }
 
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
+fn resolve_why(value: Option<String>) -> Result<String> {
+    let value = match value {
+        Some(value) if value == "-" => {
+            let mut input = String::new();
+            std::io::stdin()
+                .read_to_string(&mut input)
+                .map_err(Error::Stdin)?;
+            input
+        }
+        Some(value) => value,
+        None => logbook::capture_via_editor()?,
+    };
+    let value = value.trim().to_string();
+    if value.is_empty() {
+        return Err(Error::EmptyEntry);
+    }
+    Ok(value)
+}
+
+fn validated_title(value: String) -> Result<String> {
+    let value = value.trim().to_string();
+    if value.is_empty() {
+        return Err(Error::InvalidEntry("title cannot be empty".into()));
+    }
+    if value.contains('\n') || value.contains('\r') {
+        return Err(Error::InvalidEntry("title must fit on one line".into()));
+    }
+    Ok(value)
+}
+
+fn validated_new_date(value: Option<String>) -> Result<String> {
+    let value = value.unwrap_or_else(today);
+    validate_date_arg("date", &value)?;
+    Ok(value)
+}
+
+fn normalized_tags(tags: Vec<String>) -> Result<Vec<String>> {
+    let mut normalized = Vec::new();
+    for tag in tags {
+        let tag = tag.trim();
+        if tag.is_empty() {
+            return Err(Error::InvalidEntry("tags cannot be empty".into()));
+        }
+        if tag.contains(',') || tag.contains('\n') || tag.contains('\r') {
+            return Err(Error::InvalidEntry(
+                "tags cannot contain commas or newlines".into(),
+            ));
+        }
+        let folded = tag.to_lowercase();
+        if !normalized
+            .iter()
+            .any(|existing: &String| existing.to_lowercase() == folded)
+        {
+            normalized.push(tag.to_string());
+        }
+    }
+    Ok(normalized)
+}
+
 fn supersede(
+    path: &Path,
     old_date: String,
     old_title: Option<String>,
-    title: String,
-    why: Option<String>,
-    rejected: Option<String>,
-    risk: Option<String>,
-    tags: Vec<String>,
-    stage: bool,
+    entry: NewEntry,
 ) -> Result<()> {
     validate_date_arg("old_date", &old_date)?;
 
-    let existing = load_entries()?;
+    let existing = load_entries(path)?;
     let dated: Vec<&Entry> = existing
         .iter()
         .filter(|e| e.date.as_deref() == Some(&old_date))
@@ -320,35 +495,44 @@ fn supersede(
         Some(old_title) => format!("{old_date} — {old_title}"),
         None => old_date,
     };
+    if !target.is_active() {
+        return Err(Error::SupersedeTargetInactive(reference));
+    }
 
-    let why = match why {
-        Some(w) => w,
-        None => logbook::capture_via_editor()?,
-    };
+    let title = validated_title(entry.title)?;
+    let date = validated_new_date(entry.date)?;
+    let tags = normalized_tags(entry.tags)?;
+    reject_duplicate_reference(&existing, &date, &title)?;
+    let why = resolve_why(entry.why)?;
 
-    let path = logbook_path();
-    let date = today();
     let block = render_entry_block(&RenderInput {
         date: &date,
         title: &title,
         why: &why,
-        rejected: rejected.as_deref(),
-        risk: risk.as_deref(),
+        rejected: entry.rejected.as_deref(),
+        risk: entry.risk.as_deref(),
         tags: &tags,
         supersedes: Some(&reference),
     });
-    atomic_append(&path, &block)?;
-    println!("added: {date} — {title} (supersedes {reference})");
+    atomic_append(path, &block)?;
+    if entry.stage {
+        git_add(path)?;
+    }
+    outln!("added: {date} — {title} (supersedes {reference})")?;
 
-    if stage {
-        git_add(&path)?;
-        println!("staged {}", path.display());
+    if entry.print {
+        outln!("---")?;
+        out!("{block}")?;
+    }
+
+    if entry.stage {
+        outln!("staged {}", path.display())?;
     }
     Ok(())
 }
 
 fn validate_date_arg(flag: &str, value: &str) -> Result<()> {
-    if !is_date_shaped(value) {
+    if !is_valid_date(value) {
         return Err(Error::BadDate {
             flag: flag.to_string(),
             value: value.to_string(),
@@ -357,111 +541,264 @@ fn validate_date_arg(flag: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
-fn load_entries() -> Result<Vec<Entry>> {
-    let text = read_text(&logbook_path())?;
+fn reject_duplicate_reference(entries: &[Entry], date: &str, title: &str) -> Result<()> {
+    let reference = format!("{date} — {title}");
+    if entries
+        .iter()
+        .any(|entry| entry.reference().as_deref() == Some(&reference))
+    {
+        return Err(Error::DuplicateDecision(reference));
+    }
+    Ok(())
+}
+
+fn load_entries(path: &Path) -> Result<Vec<Entry>> {
+    let text = read_text(path)?;
     Ok(parse_entries(&text))
 }
 
 fn list(
-    tag_filter: Option<&str>,
-    since: Option<&str>,
-    until: Option<&str>,
-    limit: Option<NonZeroUsize>,
+    path: &Path,
+    search: Option<&str>,
+    filters: &FilterArgs,
     colorize: bool,
+    no_hit_term: Option<&str>,
 ) -> Result<()> {
-    if let Some(s) = since {
-        validate_date_arg("since", s)?;
-    }
-    if let Some(u) = until {
-        validate_date_arg("until", u)?;
-    }
-
-    let entries = load_entries()?;
+    validate_filters(filters)?;
+    let entries = load_entries(path)?;
     if entries.is_empty() {
-        println!("(no entries yet)");
+        outln!("(no entries yet)")?;
         return Ok(());
     }
-    let needle = tag_filter.map(|t| t.to_lowercase());
-    let mut hits = 0;
-    for entry in entries.iter().rev() {
-        if let Some(ref n) = needle {
-            if !entry.tags.iter().any(|t| t.to_lowercase() == *n) {
-                continue;
-            }
-        }
-        if let Some(s) = since {
-            match entry.date.as_deref() {
-                Some(d) if d >= s => {}
-                _ => continue,
-            }
-        }
-        if let Some(u) = until {
-            match entry.date.as_deref() {
-                Some(d) if d <= u => {}
-                _ => continue,
-            }
-        }
-        emit(&entry.raw, colorize);
-        hits += 1;
-        if limit.is_some_and(|limit| hits >= limit.get()) {
-            break;
-        }
+    let hits = matching_entries(&entries, search, filters, true);
+    for entry in &hits {
+        emit(&entry.raw, colorize)?;
     }
-    if hits == 0 {
-        println!("no entries match the given filters");
+    if hits.is_empty() {
+        match no_hit_term {
+            Some(term) => outln!("no entries match \"{term}\"")?,
+            None => outln!("no entries match the given filters")?,
+        }
     }
     Ok(())
 }
 
-fn search(term: &str, colorize: bool) -> Result<()> {
-    let entries = load_entries()?;
-    let needle = term.to_lowercase();
-    let mut hits = 0;
-    for entry in entries.iter().rev() {
-        if entry.raw.to_lowercase().contains(&needle) {
-            emit(&entry.raw, colorize);
-            hits += 1;
-        }
+fn validate_filters(filters: &FilterArgs) -> Result<()> {
+    if let Some(since) = filters.since.as_deref() {
+        validate_date_arg("since", since)?;
     }
-    if hits == 0 {
-        println!("no entries match \"{term}\"");
+    if let Some(until) = filters.until.as_deref() {
+        validate_date_arg("until", until)?;
+    }
+    if filters
+        .since
+        .as_deref()
+        .zip(filters.until.as_deref())
+        .is_some_and(|(since, until)| since > until)
+    {
+        return Err(Error::InvalidEntry(
+            "--since cannot be after --until".into(),
+        ));
+    }
+    for tag in &filters.tags {
+        if tag.trim().is_empty() {
+            return Err(Error::InvalidEntry("tag filters cannot be empty".into()));
+        }
     }
     Ok(())
 }
 
-fn last(colorize: bool) -> Result<()> {
-    let entries = load_entries()?;
+fn matching_entries<'a>(
+    entries: &'a [Entry],
+    search: Option<&str>,
+    filters: &FilterArgs,
+    newest_first: bool,
+) -> Vec<&'a Entry> {
+    let search = search.map(str::to_lowercase);
+    let tags: Vec<String> = filters
+        .tags
+        .iter()
+        .map(|tag| tag.trim().to_lowercase())
+        .collect();
+    let mut hits: Vec<&Entry> = entries
+        .iter()
+        .filter(|entry| {
+            (!filters.active || entry.is_active())
+                && tags
+                    .iter()
+                    .all(|needle| entry.tags.iter().any(|tag| tag.to_lowercase() == *needle))
+                && filters
+                    .since
+                    .as_deref()
+                    .is_none_or(|since| entry.date.as_deref().is_some_and(|date| date >= since))
+                && filters
+                    .until
+                    .as_deref()
+                    .is_none_or(|until| entry.date.as_deref().is_some_and(|date| date <= until))
+                && search
+                    .as_deref()
+                    .is_none_or(|needle| entry.raw.to_lowercase().contains(needle))
+        })
+        .collect();
+    if newest_first {
+        hits.reverse();
+        if let Some(limit) = filters.limit {
+            hits.truncate(limit.get());
+        }
+    } else if let Some(limit) = filters.limit {
+        let keep_from = hits.len().saturating_sub(limit.get());
+        hits.drain(..keep_from);
+    }
+    hits
+}
+
+fn last(path: &Path, colorize: bool) -> Result<()> {
+    let entries = load_entries(path)?;
     match entries.last() {
         Some(e) => {
             if colorize {
-                println!("{}", logbook::colorize_block(&e.raw));
+                outln!("{}", logbook::colorize_block(&e.raw))?;
             } else {
-                println!("{}", e.raw);
+                outln!("{}", e.raw)?;
             }
         }
-        None => println!("(no entries yet)"),
+        None => outln!("(no entries yet)")?,
     }
     Ok(())
 }
 
-fn show(date: &str, colorize: bool) -> Result<()> {
+fn show(path: &Path, date: &str, title: Option<&str>, colorize: bool) -> Result<()> {
     validate_date_arg("date", date)?;
-    let entries = load_entries()?;
+    let entries = load_entries(path)?;
     let mut hits = 0;
     for entry in entries.iter() {
-        if entry.date.as_deref() == Some(date) {
-            emit(&entry.raw, colorize);
+        if entry.date.as_deref() == Some(date)
+            && title.is_none_or(|title| entry.title.as_deref() == Some(title))
+        {
+            emit(&entry.raw, colorize)?;
             hits += 1;
         }
     }
     if hits == 0 {
-        println!("no entries on {date}");
+        outln!("no entries on {date}")?;
     }
     Ok(())
 }
 
-fn tags_cmd() -> Result<()> {
-    let entries = load_entries()?;
+fn trace(path: &Path, date: &str, title: Option<&str>, colorize: bool) -> Result<()> {
+    validate_date_arg("date", date)?;
+    let entries = load_entries(path)?;
+    let selected = select_entry(&entries, date, title)?;
+
+    let mut chain = vec![selected];
+    let mut current = selected;
+    while let Some(reference) = entries[current].supersedes.as_deref() {
+        let parents = matching_prior(&entries, current, reference);
+        match parents.as_slice() {
+            [parent] => {
+                chain.push(*parent);
+                current = *parent;
+            }
+            _ => {
+                return Err(Error::InvalidEntry(
+                    "cannot trace an invalid supersession link; run `logbook check`".into(),
+                ))
+            }
+        }
+    }
+    chain.reverse();
+
+    current = selected;
+    loop {
+        let children: Vec<usize> = entries
+            .iter()
+            .enumerate()
+            .skip(current + 1)
+            .filter_map(|(index, entry)| {
+                let reference = entry.supersedes.as_deref()?;
+                (matching_prior(&entries, index, reference).as_slice() == [current])
+                    .then_some(index)
+            })
+            .collect();
+        match children.as_slice() {
+            [] => break,
+            [child] => {
+                chain.push(*child);
+                current = *child;
+            }
+            _ => {
+                return Err(Error::InvalidEntry(
+                    "cannot trace a branched supersession; run `logbook check`".into(),
+                ))
+            }
+        }
+    }
+
+    for index in chain {
+        emit(&entries[index].raw, colorize)?;
+    }
+    Ok(())
+}
+
+fn select_entry(entries: &[Entry], date: &str, title: Option<&str>) -> Result<usize> {
+    let matches: Vec<usize> = entries
+        .iter()
+        .enumerate()
+        .filter_map(|(index, entry)| {
+            (entry.date.as_deref() == Some(date)
+                && title.is_none_or(|title| entry.title.as_deref() == Some(title)))
+            .then_some(index)
+        })
+        .collect();
+    match matches.as_slice() {
+        [index] => Ok(*index),
+        [] => Err(Error::InvalidEntry(format!(
+            "no decision matches {date}{}",
+            title.map(|title| format!(" — {title}")).unwrap_or_default()
+        ))),
+        _ => Err(Error::InvalidEntry(format!(
+            "more than one decision matches {date}; pass --title"
+        ))),
+    }
+}
+
+fn matching_prior(entries: &[Entry], before: usize, reference: &str) -> Vec<usize> {
+    let titled = reference.contains(" — ");
+    entries[..before]
+        .iter()
+        .enumerate()
+        .filter_map(|(index, entry)| {
+            let matches = if titled {
+                entry.reference().as_deref() == Some(reference)
+            } else {
+                entry.date.as_deref() == Some(reference)
+            };
+            matches.then_some(index)
+        })
+        .collect()
+}
+
+fn check(path: &Path) -> Result<()> {
+    let entries = load_entries(path)?;
+    let issues = validate_entries(&entries);
+    if !issues.is_empty() {
+        let mut stderr = std::io::stderr().lock();
+        for issue in &issues {
+            let _ = writeln!(stderr, "entry {}: {}", issue.entry, issue.message);
+        }
+        return Err(Error::CheckFailed(issues.len()));
+    }
+    let active = entries.iter().filter(|entry| entry.is_active()).count();
+    outln!(
+        "ok: {} entries ({active} active, {} superseded)",
+        entries.len(),
+        entries.len() - active
+    )?;
+    Ok(())
+}
+
+fn tags_cmd(path: &Path) -> Result<()> {
+    let entries = load_entries(path)?;
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
     for entry in &entries {
         for t in &entry.tags {
@@ -469,23 +806,23 @@ fn tags_cmd() -> Result<()> {
         }
     }
     if counts.is_empty() {
-        println!("(no tags yet — add entries with --tag <name>)");
+        outln!("(no tags yet — add entries with --tag <name>)")?;
         return Ok(());
     }
     let mut rows: Vec<(String, usize)> = counts.into_iter().collect();
     rows.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
     let max_name = rows.iter().map(|(n, _)| n.len()).max().unwrap_or(0);
     for (name, count) in rows {
-        println!("{name:<max_name$}  {count}");
+        outln!("{name:<max_name$}  {count}")?;
     }
     Ok(())
 }
 
-fn stats() -> Result<()> {
-    let entries = load_entries()?;
+fn stats(path: &Path) -> Result<()> {
+    let entries = load_entries(path)?;
     let total = entries.len();
     if total == 0 {
-        println!("(no entries yet)");
+        outln!("(no entries yet)")?;
         return Ok(());
     }
     let dates: Vec<&str> = entries.iter().filter_map(|e| e.date.as_deref()).collect();
@@ -505,32 +842,48 @@ fn stats() -> Result<()> {
         }
         s.len()
     };
+    let active = entries.iter().filter(|entry| entry.is_active()).count();
 
-    println!("total entries: {total}");
-    println!("date range:    {first} → {last_date}");
-    println!("this month:    {this_month}");
-    println!("unique tags:   {unique_tags}");
+    outln!("total entries: {total}")?;
+    outln!("active:        {active}")?;
+    outln!("superseded:    {}", total - active)?;
+    outln!("date range:    {first} → {last_date}")?;
+    outln!("this month:    {this_month}")?;
+    outln!("unique tags:   {unique_tags}")?;
     Ok(())
 }
 
-fn export(format: ExportFormat, limit: Option<NonZeroUsize>) -> Result<()> {
-    let entries = load_entries()?;
-    let start = limit
-        .map(|limit| entries.len().saturating_sub(limit.get()))
-        .unwrap_or(0);
+fn export(
+    path: &Path,
+    format: ExportFormat,
+    search: Option<&str>,
+    filters: &FilterArgs,
+) -> Result<()> {
+    validate_filters(filters)?;
+    let entries = load_entries(path)?;
+    let selected: Vec<Entry> = matching_entries(&entries, search, filters, false)
+        .into_iter()
+        .cloned()
+        .collect();
     match format {
-        ExportFormat::Json => println!("{}", entries_to_json(&entries[start..])),
+        ExportFormat::Json => outln!("{}", entries_to_json(&selected))?,
+        ExportFormat::Jsonl => {
+            let output = entries_to_json_lines(&selected);
+            if !output.is_empty() {
+                outln!("{output}")?;
+            }
+        }
     }
     Ok(())
 }
 
-fn print_where() -> Result<()> {
-    let p = logbook_path();
-    let abs = p.canonicalize().unwrap_or_else(|_| p.clone());
-    println!("{}", abs.display());
-    if !p.exists() {
-        eprintln!("(file does not exist yet — run `logbook init`)");
-        eprintln!("(env var: {ENV_VAR})");
+fn print_where(path: &Path) -> Result<()> {
+    let abs = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    outln!("{}", abs.display())?;
+    if !path.exists() {
+        let mut stderr = std::io::stderr().lock();
+        let _ = writeln!(stderr, "(file does not exist yet — run `logbook init`)");
+        let _ = writeln!(stderr, "(env var: {ENV_VAR})");
     }
     Ok(())
 }
