@@ -54,6 +54,8 @@ logbook check
 `--stage` runs `git add` for the logbook. Logbook never commits automatically.
 `add` creates the file when needed, so `init` is optional.
 
+![Recording a decision with its rationale, rejected alternative, risk, and tag](docs/screenshots/record-decision.svg)
+
 ## Everyday use
 
 Logbook discovers the nearest `logbook.md` from any nested directory, stopping
@@ -135,6 +137,8 @@ Inspect a reversal in either direction with:
 logbook trace 2026-08-01 --title "use SQLite for local state"
 logbook trace 2026-08-01 --title "use SQLite for local state" --format json
 ```
+
+![Tracing a superseded decision and validating the resulting logbook](docs/screenshots/trace-decision.svg)
 
 `--active` and `--superseded` select either side of a reversal. `logbook check`
 exits nonzero for malformed dates, missing required fields, broken or ambiguous
