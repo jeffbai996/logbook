@@ -9,6 +9,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+const LOCK_RETRY_DELAY: Duration = Duration::from_millis(10);
+
+#[cfg(windows)]
+const WINDOWS_LOCK_DELETE_RETRIES: usize = 50;
 
 /// Borrowed fields for rendering one canonical entry.
 #[derive(Debug, Clone)]
@@ -137,10 +141,16 @@ impl AppendLock {
     fn acquire(path: &Path) -> Result<Self> {
         let lock_path = lock_path_for(path);
         let started = Instant::now();
+        #[cfg(windows)]
+        let mut access_denied_retries = 0;
         loop {
             match fs::create_dir(&lock_path) {
                 Ok(()) => return Ok(Self { path: lock_path }),
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    #[cfg(windows)]
+                    {
+                        access_denied_retries = 0;
+                    }
                     if lock_is_stale(&lock_path) {
                         let _ = fs::remove_dir(&lock_path);
                         continue;
@@ -148,7 +158,18 @@ impl AppendLock {
                     if started.elapsed() >= Duration::from_secs(5) {
                         return Err(Error::Locked(lock_path));
                     }
-                    std::thread::sleep(Duration::from_millis(10));
+                    std::thread::sleep(LOCK_RETRY_DELAY);
+                }
+                // Windows can report ERROR_ACCESS_DENIED while a just-released
+                // lock directory is still being deleted. Retry that brief state,
+                // but preserve persistent permission failures as I/O errors.
+                #[cfg(windows)]
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::PermissionDenied
+                        && access_denied_retries < WINDOWS_LOCK_DELETE_RETRIES =>
+                {
+                    access_denied_retries += 1;
+                    std::thread::sleep(LOCK_RETRY_DELAY);
                 }
                 Err(error) => return Err(Error::io("create write lock", &lock_path, error)),
             }
