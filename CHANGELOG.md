@@ -29,6 +29,8 @@ Notable changes to `logbook` are recorded here.
 - The lint job no longer runs target-cache cleanup around `cargo package`,
   avoiding false ENOENT error annotations when Cargo removes its transient
   verification tree. Test jobs remain cached.
+- Windows appenders retry the brief access-denied state emitted while another
+  process removes the write-lock directory instead of failing a safe append.
 
 ## [0.5.0] - 2026-08-29
 
