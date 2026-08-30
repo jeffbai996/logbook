@@ -49,7 +49,6 @@ jobs:
       - name: Install stable toolchain with rustfmt + clippy
         run: |
           rustup toolchain install stable --profile minimal --component rustfmt,clippy --no-self-update
-      - uses: Swatinem/rust-cache@v2
       - name: cargo fmt --check
         run: cargo fmt --all -- --check
       - name: cargo clippy
