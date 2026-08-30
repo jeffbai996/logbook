@@ -1,36 +1,37 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="710" viewBox="0 0 1000 710" role="img" aria-labelledby="title description">
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="740" viewBox="0 0 800 740" role="img" aria-labelledby="title description">
   <title id="title">Tracing and validating a superseded decision</title>
   <desc id="description">A terminal showing logbook trace following a SQLite decision to its Postgres replacement, followed by a successful machine-readable validation report.</desc>
-  <rect x="16" y="16" width="968" height="678" rx="16" fill="#0d1117" stroke="#30363d" stroke-width="2"/>
-  <path d="M32 16h936a16 16 0 0 1 16 16v52H16V32a16 16 0 0 1 16-16z" fill="#161b22"/>
-  <line x1="16" y1="84" x2="984" y2="84" stroke="#30363d" stroke-width="2"/>
+  <rect x="16" y="16" width="768" height="708" rx="16" fill="#0d1117" stroke="#30363d" stroke-width="2"/>
+  <path d="M32 16h736a16 16 0 0 1 16 16v52H16V32a16 16 0 0 1 16-16z" fill="#161b22"/>
+  <line x1="16" y1="84" x2="784" y2="84" stroke="#30363d" stroke-width="2"/>
   <circle cx="52" cy="50" r="8" fill="#ff5f56"/>
   <circle cx="78" cy="50" r="8" fill="#ffbd2e"/>
   <circle cx="104" cy="50" r="8" fill="#27c93f"/>
-  <text x="500" y="57" text-anchor="middle" fill="#8b949e" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="18">logbook · follow a reversal</text>
+  <text x="400" y="57" text-anchor="middle" fill="#8b949e" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="18">logbook · follow a reversal</text>
 
-  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="18">
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="19">
     <text x="52" y="122" fill="#3fb950" font-weight="700">$</text>
-    <text x="78" y="122" fill="#f0f6fc">logbook trace 2026-08-01 --title &quot;use SQLite for local state&quot;</text>
+    <text x="78" y="122" fill="#f0f6fc">logbook trace 2026-08-01 \</text>
+    <text x="78" y="152" fill="#c9d1d9">--title &quot;use SQLite for local state&quot;</text>
 
-    <text x="52" y="166" fill="#58a6ff" font-weight="700">## 2026-08-01 — use SQLite for local state</text>
-    <text x="52" y="198" fill="#f0f6fc" font-weight="700">**why:**<tspan fill="#c9d1d9" font-weight="400"> It keeps deployment to one binary.</tspan></text>
-    <text x="52" y="230" fill="#f0f6fc" font-weight="700">**tags:**<tspan fill="#c9d1d9" font-weight="400"> storage</tspan></text>
+    <text x="52" y="196" fill="#58a6ff" font-weight="700">## 2026-08-01 — use SQLite for local state</text>
+    <text x="52" y="228" fill="#f0f6fc" font-weight="700">**why:**<tspan fill="#c9d1d9" font-weight="400"> It keeps deployment to one binary.</tspan></text>
+    <text x="52" y="260" fill="#f0f6fc" font-weight="700">**tags:**<tspan fill="#c9d1d9" font-weight="400"> storage</tspan></text>
 
-    <text x="52" y="274" fill="#58a6ff" font-weight="700">## 2026-08-30 — move state to Postgres</text>
-    <text x="52" y="306" fill="#f0f6fc" font-weight="700">**why:**<tspan fill="#c9d1d9" font-weight="400"> Write contention is now measurable.</tspan></text>
-    <text x="52" y="338" fill="#f0f6fc" font-weight="700">**supersedes:**<tspan fill="#c9d1d9" font-weight="400"> 2026-08-01 — use SQLite for local state</tspan></text>
-    <text x="52" y="370" fill="#f0f6fc" font-weight="700">**risk:**<tspan fill="#c9d1d9" font-weight="400"> Adds an operational dependency.</tspan></text>
-    <text x="52" y="402" fill="#f0f6fc" font-weight="700">**tags:**<tspan fill="#c9d1d9" font-weight="400"> storage</tspan></text>
+    <text x="52" y="304" fill="#58a6ff" font-weight="700">## 2026-08-30 — move state to Postgres</text>
+    <text x="52" y="336" fill="#f0f6fc" font-weight="700">**why:**<tspan fill="#c9d1d9" font-weight="400"> Write contention is now measurable.</tspan></text>
+    <text x="52" y="368" fill="#f0f6fc" font-weight="700">**supersedes:**<tspan fill="#c9d1d9" font-weight="400"> 2026-08-01 — use SQLite for local state</tspan></text>
+    <text x="52" y="400" fill="#f0f6fc" font-weight="700">**risk:**<tspan fill="#c9d1d9" font-weight="400"> Adds an operational dependency.</tspan></text>
+    <text x="52" y="432" fill="#f0f6fc" font-weight="700">**tags:**<tspan fill="#c9d1d9" font-weight="400"> storage</tspan></text>
 
-    <text x="52" y="454" fill="#3fb950" font-weight="700">$</text>
-    <text x="78" y="454" fill="#f0f6fc">logbook check --format json</text>
-    <text x="52" y="494" fill="#c9d1d9">{</text>
-    <text x="76" y="524" fill="#79c0ff">&quot;valid&quot;<tspan fill="#c9d1d9">: </tspan><tspan fill="#3fb950">true</tspan><tspan fill="#c9d1d9">,</tspan></text>
-    <text x="76" y="554" fill="#79c0ff">&quot;entries&quot;<tspan fill="#c9d1d9">: </tspan><tspan fill="#d2a8ff">2</tspan><tspan fill="#c9d1d9">,</tspan></text>
-    <text x="76" y="584" fill="#79c0ff">&quot;active&quot;<tspan fill="#c9d1d9">: </tspan><tspan fill="#d2a8ff">1</tspan><tspan fill="#c9d1d9">,</tspan></text>
-    <text x="76" y="614" fill="#79c0ff">&quot;superseded&quot;<tspan fill="#c9d1d9">: </tspan><tspan fill="#d2a8ff">1</tspan><tspan fill="#c9d1d9">,</tspan></text>
-    <text x="76" y="644" fill="#79c0ff">&quot;issues&quot;<tspan fill="#c9d1d9">: []</tspan></text>
-    <text x="52" y="674" fill="#c9d1d9">}</text>
+    <text x="52" y="484" fill="#3fb950" font-weight="700">$</text>
+    <text x="78" y="484" fill="#f0f6fc">logbook check --format json</text>
+    <text x="52" y="524" fill="#c9d1d9">{</text>
+    <text x="76" y="554" fill="#79c0ff">&quot;valid&quot;<tspan fill="#c9d1d9">: </tspan><tspan fill="#3fb950">true</tspan><tspan fill="#c9d1d9">,</tspan></text>
+    <text x="76" y="584" fill="#79c0ff">&quot;entries&quot;<tspan fill="#c9d1d9">: </tspan><tspan fill="#d2a8ff">2</tspan><tspan fill="#c9d1d9">,</tspan></text>
+    <text x="76" y="614" fill="#79c0ff">&quot;active&quot;<tspan fill="#c9d1d9">: </tspan><tspan fill="#d2a8ff">1</tspan><tspan fill="#c9d1d9">,</tspan></text>
+    <text x="76" y="644" fill="#79c0ff">&quot;superseded&quot;<tspan fill="#c9d1d9">: </tspan><tspan fill="#d2a8ff">1</tspan><tspan fill="#c9d1d9">,</tspan></text>
+    <text x="76" y="674" fill="#79c0ff">&quot;issues&quot;<tspan fill="#c9d1d9">: []</tspan></text>
+    <text x="52" y="704" fill="#c9d1d9">}</text>
   </g>
 </svg>
