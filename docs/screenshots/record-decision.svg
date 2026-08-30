@@ -1,13 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="530" viewBox="0 0 1200 530" role="img" aria-labelledby="title description">
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="530" viewBox="0 0 1000 530" role="img" aria-labelledby="title description">
   <title id="title">Recording a decision with logbook</title>
   <desc id="description">A terminal showing logbook add recording why a Markdown decision log was chosen, along with a rejected alternative, accepted risk, and tag.</desc>
-  <rect x="16" y="16" width="1168" height="498" rx="16" fill="#0d1117" stroke="#30363d" stroke-width="2"/>
-  <path d="M32 16h1136a16 16 0 0 1 16 16v52H16V32a16 16 0 0 1 16-16z" fill="#161b22"/>
-  <line x1="16" y1="84" x2="1184" y2="84" stroke="#30363d" stroke-width="2"/>
+  <rect x="16" y="16" width="968" height="498" rx="16" fill="#0d1117" stroke="#30363d" stroke-width="2"/>
+  <path d="M32 16h936a16 16 0 0 1 16 16v52H16V32a16 16 0 0 1 16-16z" fill="#161b22"/>
+  <line x1="16" y1="84" x2="984" y2="84" stroke="#30363d" stroke-width="2"/>
   <circle cx="52" cy="50" r="8" fill="#ff5f56"/>
   <circle cx="78" cy="50" r="8" fill="#ffbd2e"/>
   <circle cx="104" cy="50" r="8" fill="#27c93f"/>
-  <text x="600" y="57" text-anchor="middle" fill="#8b949e" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="18">logbook · record a decision</text>
+  <text x="500" y="57" text-anchor="middle" fill="#8b949e" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="18">logbook · record a decision</text>
 
   <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="18">
     <text x="52" y="122" fill="#3fb950" font-weight="700">$</text>
