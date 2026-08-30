@@ -24,6 +24,12 @@ Notable changes to `logbook` are recorded here.
   limited to fixes, portability, and maintenance unless real use exposes a
   missing core decision-log workflow.
 
+### Fixed
+
+- The lint job no longer runs target-cache cleanup around `cargo package`,
+  avoiding false ENOENT error annotations when Cargo removes its transient
+  verification tree. Test jobs remain cached.
+
 ## [0.5.0] - 2026-08-29
 
 ### Added
