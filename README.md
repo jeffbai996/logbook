@@ -4,14 +4,19 @@
 [![docs.rs](https://docs.rs/logbook/badge.svg)](https://docs.rs/logbook)
 [![CI](https://github.com/jeffbai996/logbook/actions/workflows/ci.yml/badge.svg)](https://github.com/jeffbai996/logbook/actions/workflows/ci.yml)
 
-`logbook` is a small CLI for keeping a decision log in each repository.
+`logbook` is a tiny CLI for recording the decisions that shape a repository.
 
 Code tells you what it does. Git tells you what changed. Logbook tells you why.
 
-Each repository gets one append-only `logbook.md`. It records why a product or
-architecture decision was made, which alternatives lost, what risk was
-accepted, and when a later decision superseded it. There is no service,
-database, account, generated project tree, or integration framework.
+![Code answers what, Git answers what changed, and logbook answers why](docs/screenshots/why-logbook.svg)
+
+Each repository gets one append-only `logbook.md`: plain Markdown, reviewed and
+versioned with the code it explains. There is no service, database, account, or
+project scaffolding.
+
+Write an entry when a choice is non-obvious, affects future work, and its reason
+will not be clear from the diff. Skip routine changes, status updates, and
+things the code already says better.
 
 ## Install
 
@@ -21,155 +26,98 @@ With Rust 1.85 or newer:
 cargo install logbook --locked
 ```
 
-Six prebuilt Linux, macOS, and Windows archives plus `SHA256SUMS` are attached
-to the [latest GitHub release](https://github.com/jeffbai996/logbook/releases/latest).
+Prebuilt Linux, macOS, and Windows archives and `SHA256SUMS` are attached to the
+[latest GitHub release](https://github.com/jeffbai996/logbook/releases/latest).
 
-From a checkout:
+## 60-second workflow
 
-```bash
-git clone https://github.com/jeffbai996/logbook.git
-cd logbook
-cargo install --path . --locked
-```
-
-## 60-second example
-
-Run inside a repository:
+Run this inside a Git repository:
 
 ```bash
-logbook init --stage
-
-logbook add "use SQLite for local state" \
-  --why "it keeps installation to one binary and one data file" \
-  --rejected "Postgres requires a service for a single-user tool" \
-  --risk "write concurrency is limited" \
-  --tag storage \
-  --stage
+logbook add "store tokens in the OS keychain" \
+  --why "the OS provides encryption and access control" \
+  --rejected "an app-specific file needs another key" \
+  --risk "headless environments need a separate strategy" \
+  --tag security \
+  --stage --print
 
 logbook last
-logbook search SQLite
-logbook check
+logbook search keychain
 ```
 
-`--stage` runs `git add` for the logbook. Logbook never commits automatically.
-`add` creates the file when needed, so `init` is optional.
+That is the whole loop: record a decision, retrieve it later, and commit
+`logbook.md` with the code it constrains. `add` creates the file when needed.
+`--stage` runs `git add` for it; logbook never commits automatically.
 
-![Recording a decision with its rationale, rejected alternative, risk, and tag](docs/screenshots/record-decision.svg)
+![One logbook command appending one readable Markdown decision](docs/screenshots/record-decision.svg)
 
-## Everyday use
+## The three jobs
 
-Logbook discovers the nearest `logbook.md` from any nested directory, stopping
-at the current repository root:
+### Record a decision
 
-```bash
-cd src/deep/in/the/weeds
-logbook list --active --limit 10
-logbook where
-```
-
-Use `--file PATH` for an explicit file; it takes precedence over
-`LOGBOOK_FILE`. Relative paths are resolved from the current directory:
-
-```bash
-logbook --file docs/decisions.md list
-```
-
-Omit `--why` to compose the reason in `$EDITOR` or `$VISUAL`. Use `--why -`
-for stdin and `--date` when importing an older decision:
+Pass the reason directly, pipe it on stdin with `--why -`, or omit `--why` to
+write it in `$VISUAL` or `$EDITOR`:
 
 ```bash
 logbook add "keep the API synchronous"
 
 printf '%s\n' "A daemon adds lifecycle work without improving local writes." |
   logbook add "avoid a background worker" --why - --tag architecture
-
-logbook add "adopt the existing storage format" \
-  --why "records a decision made during the migration" \
-  --date 2026-08-01
 ```
 
-Reasons, rejected alternatives, and risks may span multiple lines. Titles and
-tags stay single-line so the Markdown remains unambiguous.
+Only the title and reason are required. Add rejected alternatives, accepted
+risks, and tags when they will help the next person understand the tradeoff.
+Use `--date YYYY-MM-DD` only when importing a decision made earlier.
 
-## Retrieval
+### Find the reason
 
-`list`, `search`, and `export` share date, tag, decision-state, and limit
-filters. Repeated tags are combined with AND:
+The common retrieval commands are deliberately boring:
 
 ```bash
-logbook list --tag storage --tag local --since 2026-01-01
-logbook list --search "write contention" --active --limit 20
-logbook list --superseded
-logbook search SQLite --tag storage --active
+logbook list --active --limit 10
+logbook search "write contention" --tag storage
+logbook show 2026-08-01
+logbook tags
+logbook stats
+```
 
+`list`, `search`, and `export` share date, tag, active/superseded, and limit
+filters. Repeated tags mean AND. Human output is newest-first; stable JSON and
+JSON Lines stay in document order for scripts and agents:
+
+```bash
 logbook export --active --limit 10
 logbook export --format jsonl --tag storage
 ```
 
-Human output is newest-first. JSON and JSON Lines remain in document order and
-include the source fields plus derived `active` and `superseded_by` state.
-Machine output is never colorized. Human output honors
-`--color auto|always|never` and `NO_COLOR`.
+From a nested directory, logbook finds the nearest `logbook.md` before the
+repository root. `logbook where` shows the resolved path. Use `--file PATH` or
+`LOGBOOK_FILE` only when the log lives somewhere unusual.
 
-## Supersession
+### Change your mind without deleting history
 
-Changing a decision appends a new entry; it never edits the old one. This
-concrete example starts the chain with an imported decision:
+Do not edit an old decision into a new reality. Append its replacement:
 
 ```bash
-logbook add "use SQLite for local state" \
-  --why "it keeps installation to one binary and one data file" \
-  --date 2026-08-01
-
 logbook supersede 2026-08-01 "move state to Postgres" \
   --old-title "use SQLite for local state" \
   --why "write contention is now measurable" \
   --risk "adds an operational dependency" \
   --stage
-```
 
-`--old-title` is optional when only one entry exists on the date. When several
-entries share it, the exact title is required. A decision can have only one
-successor; supersede the current decision instead of branching an old one.
-Inspect a reversal in either direction with:
-
-```bash
 logbook trace 2026-08-01 --title "use SQLite for local state"
-logbook trace 2026-08-01 --title "use SQLite for local state" --format json
 ```
 
-![Tracing a superseded decision and validating the resulting logbook](docs/screenshots/trace-decision.svg)
+![A superseded decision remaining in history while its replacement becomes active](docs/screenshots/trace-decision.svg)
 
-`--active` and `--superseded` select either side of a reversal. `logbook check`
-exits nonzero for malformed dates, missing required fields, broken or ambiguous
-links, duplicate references, and branched supersessions. `check --format json`
-emits a stable report while preserving that exit status, making it suitable for
-CI and agents.
+The old entry stays intact and points forward through derived state; the new
+entry points back with `supersedes`. A decision has one successor, so reverse
+the current decision instead of branching an old one. `logbook check` catches
+malformed entries and broken, ambiguous, duplicate, or branched links.
 
-## Commands
+## Use with coding agents
 
-| Command | Purpose |
-|---|---|
-| `init [--stage]` | Create the resolved logbook without overwriting one. |
-| `add <title> [options]` | Append a decision from flags, stdin, or an editor. |
-| `list [filters]` | Print matching decisions newest-first. |
-| `search <term> [filters]` | Search entry text case-insensitively. |
-| `last` | Print the newest decision. |
-| `show <date> [--title T]` | Print decisions on a date. |
-| `supersede <date> <title> [options]` | Append a replacement decision. |
-| `trace <date> [--title T] [--format human|json]` | Print a complete supersession chain. |
-| `check [--format human|json]` | Validate the file and its decision graph. |
-| `export [--format json|jsonl] [filters]` | Emit stable machine-readable records. |
-| `tags` | List normalized tags and counts. |
-| `stats` | Summarize total, active, superseded, date, and tag counts. |
-| `where` | Print the resolved path. |
-| `completions <shell>` | Generate a shell completion script. |
-
-Use `logbook <command> --help` for every option.
-
-## Agent usage
-
-Agents need bounded current context, not a ceremonial document dump:
+Give an agent a small current slice, not the entire project diary:
 
 ```bash
 logbook list --active --limit 10
@@ -177,18 +125,40 @@ logbook export --active --limit 10
 logbook check --format json
 ```
 
-A useful repository instruction is:
+Put this in the repository instructions if useful:
 
 ```markdown
-Before product, architecture, or operational work, read
-`logbook list --active --limit 10`. Treat those decisions as constraints.
-Record only new non-obvious decisions, and supersede reversals instead of
-rewriting earlier entries.
+Before product, architecture, or operational work, run
+`logbook list --active --limit 10` and treat those decisions as constraints.
+Record only new non-obvious decisions. Supersede reversals instead of rewriting
+earlier entries.
 ```
 
-No agent integration is required. Reading `logbook.md` directly also works.
+There is no special agent integration. The CLI emits bounded JSON; the source
+of truth remains a file any tool can read.
 
-## Format and philosophy
+## Command reference
+
+| Command | Purpose |
+|---|---|
+| `init [--stage]` | Create an empty logbook without overwriting one. |
+| `add <title> [options]` | Append a decision from flags, stdin, or an editor. |
+| `list [filters]` | Print matching decisions newest-first. |
+| `search <term> [filters]` | Search all entry text case-insensitively. |
+| `last` | Print the newest decision. |
+| `show <date> [--title T]` | Print decisions on a date. |
+| `supersede <date> <title> [options]` | Append a replacement decision. |
+| `trace <date> [--title T] [--format human\|json]` | Print one complete decision chain. |
+| `check [--format human\|json]` | Validate the file and supersession graph. |
+| `export [--format json\|jsonl] [filters]` | Emit stable machine-readable records. |
+| `tags` | List normalized tags and counts. |
+| `stats` | Summarize decisions, dates, states, and tags. |
+| `where` | Print the resolved logbook path. |
+| `completions <shell>` | Generate a shell completion script. |
+
+Run `logbook <command> --help` for every option.
+
+## The file
 
 The source of truth is ordinary Markdown:
 
@@ -206,19 +176,19 @@ The source of truth is ordinary Markdown:
 **tags:** storage
 ```
 
-Only the dated title and `why` are required. Hand edits remain possible, but
-changed decisions should normally be superseded rather than rewritten. Writes
-use an adjacent atomic replacement and a short-lived cross-process lock, so a
-crash cannot leave a partial entry and concurrent writers do not lose one.
+Hand edits remain possible. Writes use an adjacent atomic replacement and a
+short-lived cross-process lock, so a crash cannot leave a partial entry and
+concurrent writers do not lose one.
 
-Version 0.5.1 is feature-complete for the intended product. The project is in
-maintenance mode: bug fixes, portability work, and dependency upkeep remain
-welcome; no broader feature roadmap is planned.
+## The boundary
 
-The boundary is fixed: one repository, one file, append-only, local CLI,
-git-native. Logbook will not grow a GUI, hosted service, database, sync layer,
-plugin system, semantic search, daemon, telemetry, LLM integration, or
-automatic decision extraction.
+One repository. One file. Append-only. Local CLI. Git-native.
+
+Version 0.5.1 is feature-complete and in maintenance mode. Bug fixes,
+portability work, and dependency upkeep remain welcome; broader features do
+not. Logbook will not grow a GUI, hosted service, database, sync layer, plugin
+system, semantic search, daemon, telemetry, LLM integration, or automatic
+decision extraction. Those belong in other tools.
 
 ## Development
 
@@ -231,8 +201,8 @@ cargo build --release --locked
 cargo package --locked
 ```
 
-CI tests Linux, macOS, Windows, and the Rust 1.85 MSRV. Tagged releases build
-six archives and publish one checksum file. See [CONTRIBUTING.md](CONTRIBUTING.md).
+CI covers Linux, macOS, Windows, and the Rust 1.85 MSRV. See
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

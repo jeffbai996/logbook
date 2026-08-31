@@ -1,37 +1,30 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="800" height="740" viewBox="0 0 800 740" role="img" aria-labelledby="title description">
-  <title id="title">Tracing and validating a superseded decision</title>
-  <desc id="description">A terminal showing logbook trace following a SQLite decision to its Postgres replacement, followed by a successful machine-readable validation report.</desc>
-  <rect x="16" y="16" width="768" height="708" rx="16" fill="#0d1117" stroke="#30363d" stroke-width="2"/>
-  <path d="M32 16h736a16 16 0 0 1 16 16v52H16V32a16 16 0 0 1 16-16z" fill="#161b22"/>
-  <line x1="16" y1="84" x2="784" y2="84" stroke="#30363d" stroke-width="2"/>
-  <circle cx="52" cy="50" r="8" fill="#ff5f56"/>
-  <circle cx="78" cy="50" r="8" fill="#ffbd2e"/>
-  <circle cx="104" cy="50" r="8" fill="#27c93f"/>
-  <text x="400" y="57" text-anchor="middle" fill="#8b949e" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="18">logbook · follow a reversal</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="464" viewBox="0 0 720 464" role="img" aria-labelledby="title description">
+  <title id="title">Superseding a decision preserves both entries</title>
+  <desc id="description">An older SQLite decision remains in history as superseded while a newer Postgres decision becomes active, connected by a logbook supersede command.</desc>
+  <rect x="8" y="8" width="704" height="448" rx="20" fill="#0d1117" stroke="#30363d" stroke-width="2"/>
+  <text x="36" y="48" fill="#8b949e" font-family="ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="15" font-weight="700" letter-spacing="2">CHANGE THE DECISION · KEEP THE HISTORY</text>
 
-  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="19">
-    <text x="52" y="122" fill="#3fb950" font-weight="700">$</text>
-    <text x="78" y="122" fill="#f0f6fc">logbook trace 2026-08-01 \</text>
-    <text x="78" y="152" fill="#c9d1d9">--title &quot;use SQLite for local state&quot;</text>
+  <g font-family="ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+    <rect x="28" y="70" width="664" height="120" rx="14" fill="#161b22" stroke="#30363d"/>
+    <text x="48" y="101" fill="#8b949e" font-size="14" font-weight="700">2026-08-01</text>
+    <rect x="542" y="84" width="126" height="28" rx="14" fill="#30363d"/>
+    <text x="605" y="103" text-anchor="middle" fill="#c9d1d9" font-size="12" font-weight="700">SUPERSEDED</text>
+    <text x="48" y="136" fill="#f0f6fc" font-size="23" font-weight="700">use SQLite for local state</text>
+    <text x="48" y="165" fill="#8b949e" font-size="16">Reason preserved. Entry never rewritten.</text>
 
-    <text x="52" y="196" fill="#58a6ff" font-weight="700">## 2026-08-01 — use SQLite for local state</text>
-    <text x="52" y="228" fill="#f0f6fc" font-weight="700">**why:**<tspan fill="#c9d1d9" font-weight="400"> It keeps deployment to one binary.</tspan></text>
-    <text x="52" y="260" fill="#f0f6fc" font-weight="700">**tags:**<tspan fill="#c9d1d9" font-weight="400"> storage</tspan></text>
+    <line x1="360" y1="190" x2="360" y2="218" stroke="#3fb950" stroke-width="3"/>
+    <path d="M351 211l9 10 9-10" fill="none" stroke="#3fb950" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="221" y="205" width="278" height="40" rx="20" fill="#122117" stroke="#3fb950"/>
+    <text x="360" y="231" text-anchor="middle" fill="#7ee787" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15">logbook supersede …</text>
+    <line x1="360" y1="245" x2="360" y2="266" stroke="#3fb950" stroke-width="3"/>
 
-    <text x="52" y="304" fill="#58a6ff" font-weight="700">## 2026-08-30 — move state to Postgres</text>
-    <text x="52" y="336" fill="#f0f6fc" font-weight="700">**why:**<tspan fill="#c9d1d9" font-weight="400"> Write contention is now measurable.</tspan></text>
-    <text x="52" y="368" fill="#f0f6fc" font-weight="700">**supersedes:**<tspan fill="#c9d1d9" font-weight="400"> 2026-08-01 — use SQLite for local state</tspan></text>
-    <text x="52" y="400" fill="#f0f6fc" font-weight="700">**risk:**<tspan fill="#c9d1d9" font-weight="400"> Adds an operational dependency.</tspan></text>
-    <text x="52" y="432" fill="#f0f6fc" font-weight="700">**tags:**<tspan fill="#c9d1d9" font-weight="400"> storage</tspan></text>
+    <rect x="28" y="266" width="664" height="128" rx="14" fill="#122117" stroke="#3fb950" stroke-width="2"/>
+    <text x="48" y="299" fill="#7ee787" font-size="14" font-weight="700">2026-08-30</text>
+    <rect x="574" y="281" width="94" height="28" rx="14" fill="#1f6f3f"/>
+    <text x="621" y="300" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="700">ACTIVE</text>
+    <text x="48" y="337" fill="#f0f6fc" font-size="23" font-weight="700">move state to Postgres</text>
+    <text x="48" y="367" fill="#c9d1d9" font-size="16">Write contention is now measurable.</text>
 
-    <text x="52" y="484" fill="#3fb950" font-weight="700">$</text>
-    <text x="78" y="484" fill="#f0f6fc">logbook check --format json</text>
-    <text x="52" y="524" fill="#c9d1d9">{</text>
-    <text x="76" y="554" fill="#79c0ff">&quot;valid&quot;<tspan fill="#c9d1d9">: </tspan><tspan fill="#3fb950">true</tspan><tspan fill="#c9d1d9">,</tspan></text>
-    <text x="76" y="584" fill="#79c0ff">&quot;entries&quot;<tspan fill="#c9d1d9">: </tspan><tspan fill="#d2a8ff">2</tspan><tspan fill="#c9d1d9">,</tspan></text>
-    <text x="76" y="614" fill="#79c0ff">&quot;active&quot;<tspan fill="#c9d1d9">: </tspan><tspan fill="#d2a8ff">1</tspan><tspan fill="#c9d1d9">,</tspan></text>
-    <text x="76" y="644" fill="#79c0ff">&quot;superseded&quot;<tspan fill="#c9d1d9">: </tspan><tspan fill="#d2a8ff">1</tspan><tspan fill="#c9d1d9">,</tspan></text>
-    <text x="76" y="674" fill="#79c0ff">&quot;issues&quot;<tspan fill="#c9d1d9">: []</tspan></text>
-    <text x="52" y="704" fill="#c9d1d9">}</text>
+    <text x="360" y="428" text-anchor="middle" fill="#8b949e" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15">logbook trace …  →  both decisions, in order</text>
   </g>
 </svg>
