@@ -90,16 +90,34 @@ pub fn read_text(path: &Path) -> Result<String> {
 
 /// Serialize appenders and atomically replace `path` with `block` appended.
 pub fn atomic_append(path: &Path, block: &str) -> Result<()> {
+    atomic_append_checked(path, block, |_| Ok(()))
+}
+
+/// Validate the current text and append `block` under one write lock.
+///
+/// The callback runs after the editor or other input flow has completed, so
+/// callers can re-check semantic invariants without holding the lock while a
+/// human writes.
+pub fn atomic_append_checked<F>(path: &Path, block: &str, check: F) -> Result<()>
+where
+    F: FnOnce(&str) -> Result<()>,
+{
     let _lock = AppendLock::acquire(path)?;
-    let (existing, permissions) = if path.exists() {
-        let bytes = fs::read(path).map_err(|error| Error::io("read", path, error))?;
-        let permissions = fs::metadata(path)
-            .map_err(|error| Error::io("read metadata for", path, error))?
-            .permissions();
-        (bytes, Some(permissions))
-    } else {
-        (Vec::new(), None)
+    let (existing, permissions) = match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            return Err(Error::InvalidEntry(format!(
+                "refusing to write through symlink at {}; pass --file with the target path instead",
+                path.display()
+            )))
+        }
+        Ok(metadata) => {
+            let text = fs::read_to_string(path).map_err(|error| Error::io("read", path, error))?;
+            (text, Some(metadata.permissions()))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => (String::new(), None),
+        Err(error) => return Err(Error::io("read metadata for", path, error)),
     };
+    check(&existing)?;
 
     let tmp = tmp_path_for(path);
     let write_result = (|| {
@@ -108,8 +126,10 @@ pub fn atomic_append(path: &Path, block: &str) -> Result<()> {
             .create_new(true)
             .open(&tmp)
             .map_err(|error| Error::io("open temp file", &tmp, error))?;
-        file.write_all(&existing)
+        file.write_all(existing.as_bytes())
             .map_err(|error| Error::io("copy existing contents to", &tmp, error))?;
+        file.write_all(append_separator(&existing).as_bytes())
+            .map_err(|error| Error::io("separate new entry in", &tmp, error))?;
         file.write_all(block.as_bytes())
             .map_err(|error| Error::io("write new entry to", &tmp, error))?;
         file.sync_all()
@@ -133,12 +153,26 @@ pub fn atomic_append(path: &Path, block: &str) -> Result<()> {
     Ok(())
 }
 
+fn append_separator(existing: &str) -> &'static str {
+    if existing.is_empty() || existing.ends_with("\n\n") || existing.ends_with("\r\n\r\n") {
+        ""
+    } else if existing.ends_with('\n') {
+        "\n"
+    } else {
+        "\n\n"
+    }
+}
+
 struct AppendLock {
     path: PathBuf,
 }
 
 impl AppendLock {
     fn acquire(path: &Path) -> Result<Self> {
+        Self::acquire_with_timeout(path, Duration::from_secs(5))
+    }
+
+    fn acquire_with_timeout(path: &Path, timeout: Duration) -> Result<Self> {
         let lock_path = lock_path_for(path);
         let started = Instant::now();
         #[cfg(windows)]
@@ -151,11 +185,7 @@ impl AppendLock {
                     {
                         access_denied_retries = 0;
                     }
-                    if lock_is_stale(&lock_path) {
-                        let _ = fs::remove_dir(&lock_path);
-                        continue;
-                    }
-                    if started.elapsed() >= Duration::from_secs(5) {
+                    if started.elapsed() >= timeout {
                         return Err(Error::Locked(lock_path));
                     }
                     std::thread::sleep(LOCK_RETRY_DELAY);
@@ -181,14 +211,6 @@ impl Drop for AppendLock {
     fn drop(&mut self) {
         let _ = fs::remove_dir(&self.path);
     }
-}
-
-fn lock_is_stale(path: &Path) -> bool {
-    fs::metadata(path)
-        .and_then(|metadata| metadata.modified())
-        .ok()
-        .and_then(|modified| modified.elapsed().ok())
-        .is_some_and(|age| age >= Duration::from_secs(30))
 }
 
 fn lock_path_for(path: &Path) -> PathBuf {
@@ -318,6 +340,55 @@ mod tests {
     }
 
     #[test]
+    fn atomic_append_inserts_a_parseable_boundary_after_hand_edits() {
+        let block = "## 2026-05-17 — new\n**why:** new reason\n\n";
+        for (index, existing) in [
+            "",
+            "## 2026-05-16 — old\n**why:** old reason",
+            "## 2026-05-16 — old\n**why:** old reason\n",
+            "## 2026-05-16 — old\n**why:** old reason\n\n",
+            "## 2026-05-16 — old\r\n**why:** old reason\r\n",
+            "## 2026-05-16 — old\r\n**why:** old reason\r\n\r\n",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let dir = tempdir().unwrap();
+            let path = dir.path().join(format!("logbook-{index}.md"));
+            fs::write(&path, existing).unwrap();
+
+            atomic_append(&path, block).unwrap();
+
+            let text = read_text(&path).unwrap();
+            assert!(text.starts_with(existing));
+            assert_eq!(
+                crate::parse_entries(&text).last().unwrap().title.as_deref(),
+                Some("new")
+            );
+            assert_eq!(
+                crate::parse_entries(&text).len(),
+                if existing.is_empty() { 1 } else { 2 }
+            );
+        }
+    }
+
+    #[test]
+    fn an_existing_lock_is_never_stolen() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("logbook.md");
+        let lock = lock_path_for(&path);
+        fs::create_dir(&lock).unwrap();
+
+        let error = match AppendLock::acquire_with_timeout(&path, Duration::ZERO) {
+            Ok(_) => panic!("existing lock should block acquisition"),
+            Err(error) => error,
+        };
+
+        assert!(matches!(error, Error::Locked(ref value) if value == &lock));
+        assert!(lock.is_dir());
+    }
+
+    #[test]
     fn temp_paths_are_unique_and_adjacent() {
         let path = Path::new("somewhere/logbook.md");
         let first = tmp_path_for(path);
@@ -351,6 +422,31 @@ mod tests {
         let text = read_text(&path).unwrap();
         assert_eq!(crate::parse_entries(&text).len(), 16);
         assert!(!lock_path_for(&path).exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_append_refuses_to_replace_a_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempdir().unwrap();
+        let target = dir.path().join("decisions.md");
+        let link = dir.path().join("logbook.md");
+        fs::write(&target, "# original\n").unwrap();
+        symlink(&target, &link).unwrap();
+
+        let error = atomic_append(&link, "## 2026-05-16 — no\n**why:** no\n\n").unwrap_err();
+
+        assert!(matches!(
+            error,
+            Error::InvalidEntry(ref message)
+                if message.contains("refusing to write through symlink")
+        ));
+        assert!(fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(read_text(&target).unwrap(), "# original\n");
     }
 
     #[cfg(unix)]

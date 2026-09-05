@@ -15,7 +15,9 @@ pub use error::{Error, Result};
 pub use export::{check_report_to_json, entries_to_json, entries_to_json_lines};
 pub use parse::{parse_entries, Entry};
 pub use path::resolve_logbook_path;
-pub use store::{atomic_append, init_file, read_text, render_entry_block, RenderInput};
+pub use store::{
+    atomic_append, atomic_append_checked, init_file, read_text, render_entry_block, RenderInput,
+};
 pub use validate::{validate_entries, ValidationIssue};
 
 use chrono::Local;

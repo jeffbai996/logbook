@@ -16,7 +16,8 @@ project scaffolding.
 
 Write an entry when a choice is non-obvious, affects future work, and its reason
 will not be clear from the diff. Skip routine changes, status updates, and
-things the code already says better.
+things the code already says better. Do not backfill a project diary: start
+with the next decision future you would otherwise have to reverse-engineer.
 
 ## Install
 
@@ -47,9 +48,14 @@ logbook search keychain
 
 That is the whole loop: record a decision, retrieve it later, and commit
 `logbook.md` with the code it constrains. `add` creates the file when needed.
-`--stage` runs `git add` for it; logbook never commits automatically.
+`--stage` runs `git add` for it; logbook never commits automatically. If
+staging fails, the decision remains saved and the error prints the recovery
+command.
 
 ![One logbook command appending one readable Markdown decision](docs/screenshots/record-decision.svg)
+
+The model diagrams explain how the file behaves. The retrieval panels below
+reproduce real CLI output from fixed-date examples.
 
 ## The three jobs
 
@@ -81,9 +87,12 @@ logbook tags
 logbook stats
 ```
 
+![Actual logbook search output showing one active storage decision and its reason](docs/screenshots/find-decisions.svg)
+
 `list`, `search`, and `export` share date, tag, active/superseded, and limit
-filters. Repeated tags mean AND. Human output is newest-first; stable JSON and
-JSON Lines stay in document order for scripts and agents:
+filters. Repeated tags mean AND. `list` and `search` return the most recently
+appended matches first; `show` keeps file order and `trace` keeps decision-chain
+order. Stable JSON and JSON Lines stay in document order for scripts and agents:
 
 ```bash
 logbook export --active --limit 10
@@ -124,6 +133,8 @@ logbook list --active --limit 10
 logbook export --active --limit 10
 logbook check --format json
 ```
+
+![Actual bounded JSON Lines export and machine-readable logbook check](docs/screenshots/agent-context.svg)
 
 Put this in the repository instructions if useful:
 
@@ -178,13 +189,22 @@ The source of truth is ordinary Markdown:
 
 Hand edits remain possible. Writes use an adjacent atomic replacement and a
 short-lived cross-process lock, so a crash cannot leave a partial entry and
-concurrent writers do not lose one.
+concurrent writers do not lose one. In multiline fields passed by flag or
+stdin, indent any literal line beginning with `## ` or a canonical field label
+such as `**risk:**`; the CLI rejects an unindented structural line instead of
+saving ambiguous Markdown. In the editor, lines whose first non-space character
+is `#` are comments and are omitted.
+
+Writes refuse a `logbook.md` symlink because atomic replacement would overwrite
+the link itself; pass `--file` the target path instead. If a crashed process
+leaves `<logbook path>.lock`, first verify no logbook writer is running, remove
+that lock directory, and retry.
 
 ## The boundary
 
 One repository. One file. Append-only. Local CLI. Git-native.
 
-Version 0.5.1 is feature-complete and in maintenance mode. Bug fixes,
+The 0.5 series is feature-complete and in maintenance mode. Bug fixes,
 portability work, and dependency upkeep remain welcome; broader features do
 not. Logbook will not grow a GUI, hosted service, database, sync layer, plugin
 system, semantic search, daemon, telemetry, LLM integration, or automatic

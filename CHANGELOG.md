@@ -4,6 +4,35 @@ Notable changes to `logbook` are recorded here.
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-09-04
+
+### Changed
+
+- Write-lock contention now times out instead of stealing a lock based only on
+  age. The error explains how to recover a lock left by a crashed process.
+- Release archives now include the changelog, contribution guide, and every
+  screenshot referenced by the bundled README. The crates.io package includes
+  the contribution guide too.
+- The README now shows literal filtered search, bounded JSON Lines, and JSON
+  validation output, and explains how to adopt logbook without backfilling old
+  decisions.
+- Refreshed eight compatible transitive packages without changing the direct
+  dependency set or Rust 1.85 MSRV.
+
+### Fixed
+
+- Duplicate adds and competing supersedes now re-check their semantic
+  invariants inside the write lock, so concurrent commands cannot create a
+  duplicate decision or branched supersession graph.
+- Appends insert a Markdown boundary when a hand-edited file lacks its final
+  blank line, preventing a new heading from being swallowed by the prior field.
+- Multiline reasons, rejected alternatives, and risks normalize line endings
+  and reject unindented lines that would be parsed as logbook structure.
+- Writes refuse final symlink targets instead of atomically replacing the link
+  with an independent file.
+- A failed `--stage` now says that the decision was saved and prints the manual
+  `git add` recovery command, preventing accidental duplicate retries.
+
 ## [0.5.1] - 2026-08-29
 
 ### Added
@@ -175,7 +204,8 @@ Notable changes to `logbook` are recorded here.
 - Initial CLI, tags, filters, atomic writes, `LOGBOOK_FILE`, and utility
   commands across the 0.0.x prototypes.
 
-[Unreleased]: https://github.com/jeffbai996/logbook/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/jeffbai996/logbook/compare/v0.5.2...HEAD
+[0.5.2]: https://github.com/jeffbai996/logbook/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/jeffbai996/logbook/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/jeffbai996/logbook/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/jeffbai996/logbook/compare/v0.3.0...v0.4.0

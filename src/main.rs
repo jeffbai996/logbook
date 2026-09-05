@@ -1,7 +1,7 @@
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use clap_complete::Shell;
 use logbook::{
-    atomic_append, check_report_to_json, entries_to_json, entries_to_json_lines, init_file,
+    atomic_append_checked, check_report_to_json, entries_to_json, entries_to_json_lines, init_file,
     is_valid_date, parse_entries, read_text, render_entry_block, resolve_logbook_path, today,
     validate_entries, Entry, Error, RenderInput, Result, ENV_VAR,
 };
@@ -370,7 +370,7 @@ fn dispatch(cmd: Cmd, path: &Path, colorize: bool) -> Result<()> {
 fn init(path: &Path, stage: bool) -> Result<()> {
     let created = init_file(path)?;
     if stage && created {
-        git_add(path)?;
+        stage_after_write(path)?;
     }
     if created {
         outln!("created {}", path.display())?;
@@ -391,6 +391,8 @@ fn add(path: &Path, entry: NewEntry) -> Result<()> {
         reject_duplicate_reference(&load_entries(path)?, &date, &title)?;
     }
     let why = resolve_why(entry.why)?;
+    let rejected = validated_optional_body("rejected", entry.rejected)?;
+    let risk = validated_optional_body("risk", entry.risk)?;
 
     let created = init_file(path)?;
 
@@ -398,14 +400,16 @@ fn add(path: &Path, entry: NewEntry) -> Result<()> {
         date: &date,
         title: &title,
         why: &why,
-        rejected: entry.rejected.as_deref(),
-        risk: entry.risk.as_deref(),
+        rejected: rejected.as_deref(),
+        risk: risk.as_deref(),
         tags: &tags,
         supersedes: None,
     });
-    atomic_append(path, &block)?;
+    atomic_append_checked(path, &block, |text| {
+        reject_duplicate_reference(&parse_entries(text), &date, &title)
+    })?;
     if entry.stage {
-        git_add(path)?;
+        stage_after_write(path)?;
     }
 
     if created {
@@ -437,9 +441,36 @@ fn resolve_why(value: Option<String>) -> Result<String> {
         Some(value) => value,
         None => logbook::capture_via_editor()?,
     };
-    let value = value.trim().to_string();
+    let value = validated_body("why", value)?;
     if value.is_empty() {
         return Err(Error::EmptyEntry);
+    }
+    Ok(value)
+}
+
+fn validated_optional_body(field: &str, value: Option<String>) -> Result<Option<String>> {
+    value.map(|value| validated_body(field, value)).transpose()
+}
+
+fn validated_body(field: &str, value: String) -> Result<String> {
+    let value = value.replace("\r\n", "\n").replace('\r', "\n");
+    let value = value.trim().to_string();
+    const RESERVED: [&str; 6] = [
+        "## ",
+        "**why:**",
+        "**supersedes:**",
+        "**rejected:**",
+        "**risk:**",
+        "**tags:**",
+    ];
+    if let Some(marker) = value
+        .lines()
+        .skip(1)
+        .find_map(|line| RESERVED.iter().find(|marker| line.starts_with(**marker)))
+    {
+        return Err(Error::InvalidEntry(format!(
+            "{field} contains a line beginning with reserved syntax `{marker}`; indent that line to keep it as text"
+        )));
     }
     Ok(value)
 }
@@ -493,61 +524,38 @@ fn supersede(
     validate_date_arg("old_date", &old_date)?;
 
     let existing = load_entries(path)?;
-    let dated: Vec<&Entry> = existing
-        .iter()
-        .filter(|e| e.date.as_deref() == Some(&old_date))
-        .collect();
-    if dated.is_empty() {
-        return Err(Error::SupersedeTargetMissing(old_date));
-    }
-    let target = match old_title.as_deref() {
-        Some(wanted) => {
-            let matches: Vec<&Entry> = dated
-                .into_iter()
-                .filter(|e| e.title.as_deref() == Some(wanted))
-                .collect();
-            match matches.as_slice() {
-                [entry] => *entry,
-                [] => {
-                    return Err(Error::SupersedeTitleMissing {
-                        date: old_date,
-                        title: wanted.to_string(),
-                    })
-                }
-                _ => return Err(Error::SupersedeTargetAmbiguous(old_date)),
-            }
-        }
-        None => match dated.as_slice() {
-            [entry] => *entry,
-            _ => return Err(Error::SupersedeTargetAmbiguous(old_date)),
-        },
-    };
-    let reference = match target.title.as_deref() {
-        Some(old_title) => format!("{old_date} — {old_title}"),
-        None => old_date,
-    };
-    if !target.is_active() {
-        return Err(Error::SupersedeTargetInactive(reference));
-    }
+    let reference = supersede_reference(&existing, &old_date, old_title.as_deref())?;
 
     let title = validated_title(entry.title)?;
     let date = validated_new_date(entry.date)?;
     let tags = normalized_tags(entry.tags)?;
     reject_duplicate_reference(&existing, &date, &title)?;
     let why = resolve_why(entry.why)?;
+    let rejected = validated_optional_body("rejected", entry.rejected)?;
+    let risk = validated_optional_body("risk", entry.risk)?;
 
     let block = render_entry_block(&RenderInput {
         date: &date,
         title: &title,
         why: &why,
-        rejected: entry.rejected.as_deref(),
-        risk: entry.risk.as_deref(),
+        rejected: rejected.as_deref(),
+        risk: risk.as_deref(),
         tags: &tags,
         supersedes: Some(&reference),
     });
-    atomic_append(path, &block)?;
+    atomic_append_checked(path, &block, |text| {
+        let current = parse_entries(text);
+        let locked_reference = supersede_reference(&current, &old_date, old_title.as_deref())?;
+        if locked_reference != reference {
+            return Err(Error::InvalidEntry(
+                "supersession target changed while the entry was being written; retry the command"
+                    .into(),
+            ));
+        }
+        reject_duplicate_reference(&current, &date, &title)
+    })?;
     if entry.stage {
-        git_add(path)?;
+        stage_after_write(path)?;
     }
     outln!("added: {date} — {title} (supersedes {reference})")?;
 
@@ -560,6 +568,50 @@ fn supersede(
         outln!("staged {}", path.display())?;
     }
     Ok(())
+}
+
+fn supersede_reference(
+    existing: &[Entry],
+    old_date: &str,
+    old_title: Option<&str>,
+) -> Result<String> {
+    let dated: Vec<&Entry> = existing
+        .iter()
+        .filter(|entry| entry.date.as_deref() == Some(old_date))
+        .collect();
+    if dated.is_empty() {
+        return Err(Error::SupersedeTargetMissing(old_date.to_string()));
+    }
+    let target = match old_title {
+        Some(wanted) => {
+            let matches: Vec<&Entry> = dated
+                .into_iter()
+                .filter(|e| e.title.as_deref() == Some(wanted))
+                .collect();
+            match matches.as_slice() {
+                [entry] => *entry,
+                [] => {
+                    return Err(Error::SupersedeTitleMissing {
+                        date: old_date.to_string(),
+                        title: wanted.to_string(),
+                    })
+                }
+                _ => return Err(Error::SupersedeTargetAmbiguous(old_date.to_string())),
+            }
+        }
+        None => match dated.as_slice() {
+            [entry] => *entry,
+            _ => return Err(Error::SupersedeTargetAmbiguous(old_date.to_string())),
+        },
+    };
+    let reference = match target.title.as_deref() {
+        Some(old_title) => format!("{old_date} — {old_title}"),
+        None => old_date.to_string(),
+    };
+    if !target.is_active() {
+        return Err(Error::SupersedeTargetInactive(reference));
+    }
+    Ok(reference)
 }
 
 fn validate_date_arg(flag: &str, value: &str) -> Result<()> {
@@ -955,14 +1007,25 @@ fn print_where(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn git_add(path: &Path) -> Result<()> {
+fn git_add(path: &Path) -> std::result::Result<(), String> {
     let status = Command::new("git")
         .arg("add")
+        .arg("--")
         .arg(path)
         .status()
-        .map_err(|e| Error::Git(format!("failed to spawn git add: {e}")))?;
+        .map_err(|error| format!("failed to spawn git add: {error}"))?;
     if !status.success() {
-        return Err(Error::Git(format!("git add exited with status {status}")));
+        return Err(format!("git add exited with status {status}"));
     }
     Ok(())
+}
+
+fn stage_after_write(path: &Path) -> Result<()> {
+    git_add(path).map_err(|message| {
+        Error::Git(format!(
+            "logbook was updated at {}, but staging failed: {message}. Run `git add -- \"{}\"` to stage it",
+            path.display(),
+            path.display()
+        ))
+    })
 }

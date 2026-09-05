@@ -9,7 +9,7 @@ static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 const WHY_TEMPLATE: &str = "\n\
 # Write the WHY for this decision above — the reason you chose this design.\n\
-# Lines starting with '#' are ignored. An empty message aborts the entry.\n";
+# Lines whose first non-space character is '#' are ignored. An empty message aborts the entry.\n";
 
 fn resolve_editor() -> Result<String> {
     for var in ["EDITOR", "VISUAL"] {
