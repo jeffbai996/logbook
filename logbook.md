@@ -86,3 +86,10 @@ Newest entries at the bottom. Generated and maintained by `logbook` — https://
 **rejected:** config files, quiet-mode aliases for shell redirection, a generic output framework, or any service-backed integration
 **risk:** shell completion generation adds one small dependency that shares clap's Rust 1.85 floor; future releases now require evidence of a broken core workflow
 **tags:** release, scope, agents, maintenance
+
+## 2026-09-04 — close correctness gaps and keep 0.5 feature-complete
+**why:** the final audit found write-integrity and distribution defects worth fixing, while the existing commands already cover the complete local decision-log workflow
+**supersedes:** 2026-08-29 — finalize inspection ergonomics and freeze at 0.5.1
+**rejected:** adding context aliases, indexes, semantic retrieval, automatic agent integration, or another feature roadmap
+**risk:** a lock left by a crashed process now requires explicit cleanup, and symlinked logbooks must be addressed by their real target path
+**tags:** release, scope, maintenance, filesystem
