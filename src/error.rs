@@ -28,7 +28,9 @@ pub enum Error {
     Git(String),
 
     /// Another process held the append lock for too long.
-    #[error("timed out waiting for the logbook write lock at {0}")]
+    #[error(
+        "timed out waiting for the logbook write lock at {0}; if no logbook process is writing, remove that lock directory and retry"
+    )]
     Locked(PathBuf),
 
     /// User input would produce a malformed canonical entry.

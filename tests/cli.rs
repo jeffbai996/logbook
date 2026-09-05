@@ -457,6 +457,26 @@ fn fake_editor(dir: &std::path::Path, body: &str) -> PathBuf {
     p
 }
 
+/// Write an editor that releases every caller only after all have opened it.
+#[cfg(unix)]
+fn barrier_editor(dir: &std::path::Path, participants: usize) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let markers = dir.join("editor-markers");
+    std::fs::create_dir(&markers).unwrap();
+    let path = dir.join("barrier-editor.sh");
+    std::fs::write(
+        &path,
+        format!(
+            "#!/bin/sh\ntouch \"{}/$$\"\nattempts=0\nwhile [ \"$(find \"{}\" -type f | wc -l)\" -lt {participants} ]; do\n  attempts=$((attempts + 1))\n  if [ \"$attempts\" -ge 500 ]; then echo 'editor barrier timed out' >&2; exit 1; fi\n  sleep 0.01\ndone\nprintf 'coordinated reason\\n' >> \"$1\"\n",
+            markers.display(),
+            markers.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    path
+}
+
 #[cfg(unix)]
 #[test]
 fn add_without_why_opens_editor_and_captures() {
@@ -516,6 +536,137 @@ fn add_with_why_flag_does_not_open_editor() {
         .success();
     let body = std::fs::read_to_string(sb.path()).unwrap();
     assert!(body.contains("**why:** explicit reason"));
+}
+
+#[test]
+fn body_fields_reject_structural_lines_without_writing() {
+    let sb = Sandbox::new();
+    sb.seed("# logbook\n\n");
+    let original = std::fs::read_to_string(sb.path()).unwrap();
+    let cases = [
+        vec!["add", "bad why", "--why", "opening\n## fake entry"],
+        vec![
+            "add",
+            "bad rejected",
+            "--why",
+            "safe",
+            "--rejected",
+            "opening\n**risk:** injected",
+        ],
+        vec![
+            "add",
+            "bad risk",
+            "--why",
+            "safe",
+            "--risk",
+            "opening\n**tags:** injected",
+        ],
+    ];
+
+    for args in cases {
+        sb.cmd()
+            .args(args)
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("indent that line"));
+        assert_eq!(std::fs::read_to_string(sb.path()).unwrap(), original);
+    }
+}
+
+#[test]
+fn piped_structural_why_is_rejected_without_writing() {
+    let sb = Sandbox::new();
+    sb.cmd()
+        .args(["add", "bad pipe", "--why", "-"])
+        .write_stdin("opening\n**supersedes:** 2026-01-01 — fake\n")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("reserved syntax"));
+    assert!(!sb.path().exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn editor_structural_why_is_rejected_without_writing() {
+    let sb = Sandbox::new();
+    let editor = fake_editor(sb.dir.path(), "opening\\n**risk:** injected\\n");
+    sb.cmd()
+        .env("EDITOR", editor)
+        .args(["add", "bad editor"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("reserved syntax"));
+    assert!(!sb.path().exists());
+}
+
+#[test]
+fn body_fields_normalize_crlf_and_allow_indented_markers() {
+    let sb = Sandbox::new();
+    sb.cmd()
+        .args([
+            "add",
+            "portable body",
+            "--why",
+            "first\r\n  ## literal heading\r\nlast",
+            "--rejected",
+            "one\r\n  **risk:** literal text",
+        ])
+        .assert()
+        .success();
+
+    let body = std::fs::read_to_string(sb.path()).unwrap();
+    assert!(!body.contains('\r'));
+    let entry = logbook::parse_entries(&body).pop().unwrap();
+    assert_eq!(
+        entry.why.as_deref(),
+        Some("first\n  ## literal heading\nlast")
+    );
+    assert_eq!(
+        entry.rejected.as_deref(),
+        Some("one\n  **risk:** literal text")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn concurrent_identical_adds_commit_only_one_decision() {
+    let sb = Sandbox::new();
+    sb.seed("# logbook\n\n");
+    let editor = barrier_editor(sb.dir.path(), 2);
+    let children: Vec<_> = (0..2)
+        .map(|_| {
+            std::process::Command::new(env!("CARGO_BIN_EXE_logbook"))
+                .env("LOGBOOK_FILE", sb.path())
+                .env("EDITOR", &editor)
+                .args(["add", "one decision", "--date", "2026-01-01"])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap()
+        })
+        .collect();
+    let outputs: Vec<_> = children
+        .into_iter()
+        .map(|child| child.wait_with_output().unwrap())
+        .collect();
+
+    assert_eq!(
+        outputs
+            .iter()
+            .filter(|output| output.status.success())
+            .count(),
+        1
+    );
+    assert!(outputs
+        .iter()
+        .filter(|output| !output.status.success())
+        .all(|output| {
+            String::from_utf8_lossy(&output.stderr).contains("a decision already exists")
+        }));
+    assert_eq!(
+        logbook::parse_entries(&std::fs::read_to_string(sb.path()).unwrap()).len(),
+        1
+    );
 }
 
 #[test]
@@ -680,6 +831,51 @@ fn supersede_rejects_an_already_superseded_decision() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn concurrent_supersedes_commit_only_one_successor() {
+    let sb = Sandbox::new();
+    sb.seed("## 2026-01-01 — original\n**why:** first\n\n");
+    let editor = barrier_editor(sb.dir.path(), 2);
+    let children: Vec<_> = (0..2)
+        .map(|_| {
+            std::process::Command::new(env!("CARGO_BIN_EXE_logbook"))
+                .env("LOGBOOK_FILE", sb.path())
+                .env("EDITOR", &editor)
+                .args([
+                    "supersede",
+                    "2026-01-01",
+                    "replacement",
+                    "--date",
+                    "2026-02-01",
+                ])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap()
+        })
+        .collect();
+    let outputs: Vec<_> = children
+        .into_iter()
+        .map(|child| child.wait_with_output().unwrap())
+        .collect();
+
+    assert_eq!(
+        outputs
+            .iter()
+            .filter(|output| output.status.success())
+            .count(),
+        1
+    );
+    assert!(outputs
+        .iter()
+        .filter(|output| !output.status.success())
+        .all(|output| { String::from_utf8_lossy(&output.stderr).contains("already superseded") }));
+    let entries = logbook::parse_entries(&std::fs::read_to_string(sb.path()).unwrap());
+    assert_eq!(entries.len(), 2);
+    assert!(logbook::validate_entries(&entries).is_empty());
+}
+
 #[test]
 fn list_combines_date_and_tag_filters() {
     let sb = Sandbox::new();
@@ -726,6 +922,28 @@ fn add_with_stage_stages_the_logbook() {
         .assert()
         .success()
         .stdout(predicate::str::contains("logbook.md"));
+}
+
+#[test]
+fn stage_failure_reports_that_the_decision_was_saved() {
+    let sb = Sandbox::new();
+    let path = sb.dir.path().join("decision logs/logbook.md");
+    std::fs::create_dir(path.parent().unwrap()).unwrap();
+    let mut command = Command::cargo_bin("logbook").unwrap();
+    command
+        .env("LOGBOOK_FILE", &path)
+        .args(["add", "saved once", "--why", "because", "--stage"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("logbook was updated"))
+        .stderr(predicate::str::contains(format!(
+            "git add -- \"{}\"",
+            path.display()
+        )));
+
+    let entries = logbook::parse_entries(&std::fs::read_to_string(path).unwrap());
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].title.as_deref(), Some("saved once"));
 }
 
 #[test]
@@ -896,6 +1114,31 @@ fn file_flag_overrides_environment_path() {
 
     assert!(explicit.exists());
     assert!(!environment.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn cli_refuses_to_write_through_a_symlink() {
+    use std::os::unix::fs::symlink;
+
+    let sb = Sandbox::new();
+    let target = sb.dir.path().join("decisions.md");
+    std::fs::write(&target, "# original\n").unwrap();
+    symlink(&target, sb.path()).unwrap();
+
+    sb.cmd()
+        .args(["add", "must not fork", "--why", "because"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "refusing to write through symlink",
+        ));
+
+    assert!(std::fs::symlink_metadata(sb.path())
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert_eq!(std::fs::read_to_string(target).unwrap(), "# original\n");
 }
 
 #[test]
