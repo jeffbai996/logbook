@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="654" viewBox="0 0 720 654" role="img" aria-labelledby="title description" xml:space="preserve">
+  <title id="title">Agents can read bounded JSON and validate the logbook</title>
+  <desc id="description">Actual terminal output from a one-entry JSON Lines export and a JSON validation check. The long JSON Lines record wraps visually to fit the panel.</desc>
+  <rect x="8" y="8" width="704" height="638" rx="20" fill="#0d1117" stroke="#30363d" stroke-width="2"/>
+  <path d="M28 8h664a20 20 0 0 1 20 20v44H8V28A20 20 0 0 1 28 8z" fill="#161b22"/>
+  <line x1="8" y1="72" x2="712" y2="72" stroke="#30363d" stroke-width="2"/>
+  <circle cx="38" cy="40" r="7" fill="#ff5f56"/>
+  <circle cx="61" cy="40" r="7" fill="#ffbd2e"/>
+  <circle cx="84" cy="40" r="7" fill="#27c93f"/>
+  <text x="360" y="46" text-anchor="middle" fill="#8b949e" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="16">bounded context · machine-checkable health</text>
+
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace">
+    <text x="34" y="108" fill="#3fb950" font-size="17" font-weight="700">$</text>
+    <text x="58" y="108" fill="#f0f6fc" font-size="17">logbook export --format jsonl --active --limit 1</text>
+    <rect x="28" y="130" width="664" height="190" rx="12" fill="#161b22" stroke="#30363d"/>
+    <text x="48" y="160" fill="#8b949e" font-size="13" font-weight="700" letter-spacing="1.5">ACTUAL JSONL OUTPUT · WRAPPED TO FIT</text>
+    <text x="48" y="194" fill="#c9d1d9" font-size="15">{&quot;date&quot;:&quot;2026-08-30&quot;,&quot;title&quot;:&quot;move state to Postgres&quot;,</text>
+    <text x="48" y="222" fill="#c9d1d9" font-size="15">&quot;why&quot;:&quot;Write contention is now measurable.&quot;,&quot;rejected&quot;:null,</text>
+    <text x="48" y="250" fill="#c9d1d9" font-size="15">&quot;risk&quot;:&quot;Adds an operational dependency.&quot;,&quot;supersedes&quot;:</text>
+    <text x="48" y="278" fill="#c9d1d9" font-size="15">&quot;2026-08-01 — use SQLite for local state&quot;,&quot;tags&quot;:[&quot;storage&quot;],</text>
+    <text x="48" y="306" fill="#c9d1d9" font-size="15">&quot;active&quot;:true,&quot;superseded_by&quot;:[]}</text>
+
+    <text x="34" y="362" fill="#3fb950" font-size="17" font-weight="700">$</text>
+    <text x="58" y="362" fill="#f0f6fc" font-size="17">logbook check --format json</text>
+    <rect x="28" y="384" width="664" height="242" rx="12" fill="#122117" stroke="#3fb950"/>
+    <text x="48" y="414" fill="#8b949e" font-size="13" font-weight="700" letter-spacing="1.5">ACTUAL OUTPUT</text>
+    <text x="48" y="444" fill="#c9d1d9" font-size="15">{</text>
+    <text x="48" y="472" fill="#c9d1d9" font-size="15">  &quot;valid&quot;: true,</text>
+    <text x="48" y="500" fill="#c9d1d9" font-size="15">  &quot;entries&quot;: 2,</text>
+    <text x="48" y="528" fill="#c9d1d9" font-size="15">  &quot;active&quot;: 1,</text>
+    <text x="48" y="556" fill="#c9d1d9" font-size="15">  &quot;superseded&quot;: 1,</text>
+    <text x="48" y="584" fill="#c9d1d9" font-size="15">  &quot;issues&quot;: []</text>
+    <text x="48" y="612" fill="#c9d1d9" font-size="15">}</text>
+    <circle cx="650" cy="502" r="18" fill="#1f6f3f"/>
+    <path d="M641 502l6 6 12-14" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

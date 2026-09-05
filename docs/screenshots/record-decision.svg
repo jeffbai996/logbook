@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="720" height="500" viewBox="0 0 720 500" role="img" aria-labelledby="title description">
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="500" viewBox="0 0 720 500" role="img" aria-labelledby="title description" xml:space="preserve">
   <title id="title">One command appends one Markdown decision</title>
   <desc id="description">A compact terminal transcript showing logbook add followed by the readable Markdown entry appended to logbook.md.</desc>
   <rect x="8" y="8" width="704" height="484" rx="20" fill="#0d1117" stroke="#30363d" stroke-width="2"/>
