@@ -1,154 +1,53 @@
 # logbook
 
-[![crates.io](https://img.shields.io/crates/v/logbook.svg)](https://crates.io/crates/logbook)
-[![docs.rs](https://docs.rs/logbook/badge.svg)](https://docs.rs/logbook)
-[![CI](https://github.com/jeffbai996/logbook/actions/workflows/ci.yml/badge.svg)](https://github.com/jeffbai996/logbook/actions/workflows/ci.yml)
+A CLI that records repository decisions in one append-only `logbook.md`.
 
-`logbook` is a tiny CLI for recording the decisions that shape a repository.
+One repository. One file. Append-only. Local CLI. Git-native. No service,
+database, account or project scaffolding. No GUI, daemon, telemetry, LLM
+integration or sync layer; those belong in other tools.
 
-Code tells you what it does. Git tells you what changed. Logbook tells you why.
-
-![Code answers what, Git answers what changed, and logbook answers why](docs/screenshots/why-logbook.svg)
-
-Each repository gets one append-only `logbook.md`: plain Markdown, reviewed and
-versioned with the code it explains. There is no service, database, account, or
-project scaffolding.
-
-Write an entry when a choice is non-obvious, affects future work, and its reason
-will not be clear from the diff. Skip routine changes, status updates, and
-things the code already says better. Do not backfill a project diary: start
-with the next decision future you would otherwise have to reverse-engineer.
+Write an entry for a non-obvious choice that affects future work and whose
+reason is not clear from the diff. Skip routine changes, status updates and
+things the code says better. Do not backfill a project diary: start with the
+next decision you would otherwise have to reverse-engineer.
 
 ## Install
 
-With Rust 1.85 or newer:
+Rust 1.85 or newer:
 
 ```bash
 cargo install logbook --locked
 ```
 
-Prebuilt Linux, macOS, and Windows archives and `SHA256SUMS` are attached to the
+Prebuilt Linux, macOS and Windows archives and `SHA256SUMS` are attached to the
 [latest GitHub release](https://github.com/jeffbai996/logbook/releases/latest).
 
-## 60-second workflow
-
-Run this inside a Git repository:
+## Usage
 
 ```bash
 logbook add "store tokens in the OS keychain" \
   --why "the OS provides encryption and access control" \
   --rejected "an app-specific file needs another key" \
   --risk "headless environments need a separate strategy" \
-  --tag security \
-  --stage --print
-
+  --tag security --stage --print
 logbook last
 logbook search keychain
-```
-
-That is the whole loop: record a decision, retrieve it later, and commit
-`logbook.md` with the code it constrains. `add` creates the file when needed.
-`--stage` runs `git add` for it; logbook never commits automatically. If
-staging fails, the decision remains saved and the error prints the recovery
-command.
-
-![One logbook command appending one readable Markdown decision](docs/screenshots/record-decision.svg)
-
-The model diagrams explain how the file behaves. The retrieval panels below
-reproduce real CLI output from fixed-date examples.
-
-## The three jobs
-
-### Record a decision
-
-Pass the reason directly, pipe it on stdin with `--why -`, or omit `--why` to
-write it in `$EDITOR` (or `$VISUAL` when `$EDITOR` is unset):
-
-```bash
-logbook add "keep the API synchronous"
-
-printf '%s\n' "A daemon adds lifecycle work without improving local writes." |
-  logbook add "avoid a background worker" --why - --tag architecture
-```
-
-Only the title and reason are required. Add rejected alternatives, accepted
-risks, and tags when they will help the next person understand the tradeoff.
-Use `--date YYYY-MM-DD` only when importing a decision made earlier.
-
-### Find the reason
-
-The common retrieval commands are deliberately boring:
-
-```bash
-logbook list --active --limit 10
-logbook search "write contention" --tag storage
-logbook show 2026-08-01
-logbook tags
-logbook stats
-```
-
-![Actual logbook search output showing one active storage decision and its reason](docs/screenshots/find-decisions.svg)
-
-`list`, `search`, and `export` share date, tag, active/superseded, and limit
-filters. Repeated tags mean AND. `list` and `search` return the most recently
-appended matches first; `show` keeps file order and `trace` keeps decision-chain
-order. Stable JSON and JSON Lines stay in document order for scripts and agents:
-
-```bash
-logbook export --active --limit 10
-logbook export --format jsonl --tag storage
-```
-
-From a nested directory, logbook finds the nearest `logbook.md` before the
-repository root. `logbook where` shows the resolved path. Use `--file PATH` or
-`LOGBOOK_FILE` only when the log lives somewhere unusual.
-
-### Change your mind without deleting history
-
-Do not edit an old decision into a new reality. Append its replacement:
-
-```bash
-logbook supersede 2026-08-01 "move state to Postgres" \
-  --old-title "use SQLite for local state" \
-  --why "write contention is now measurable" \
-  --risk "adds an operational dependency" \
-  --stage
-
+logbook supersede 2026-08-01 "move state to Postgres" --why "write contention is now measurable"
 logbook trace 2026-08-01 --title "use SQLite for local state"
-```
-
-![A superseded decision remaining in history while its replacement becomes active](docs/screenshots/trace-decision.svg)
-
-The old entry stays intact and points forward through derived state; the new
-entry points back with `supersedes`. A decision has one successor, so reverse
-the current decision instead of branching an old one. `logbook check` catches
-malformed entries and broken, ambiguous, duplicate, or branched links.
-
-## Use with coding agents
-
-Give an agent a small current slice, not the entire project diary:
-
-```bash
-logbook list --active --limit 10
 logbook export --active --limit 10
 logbook check --format json
 ```
 
-![Actual bounded JSON Lines export and machine-readable logbook check](docs/screenshots/agent-context.svg)
+`add` creates the file when needed. `--stage` runs `git add` on it; logbook
+never commits. If staging fails, the decision stays saved and the error prints
+the recovery command.
 
-Put this in the repository instructions if useful:
+Only the title and the reason are required; rejected alternatives, risks and
+tags are optional.
 
-```markdown
-Before product, architecture, or operational work, run
-`logbook list --active --limit 10` and treat those decisions as constraints.
-Record only new non-obvious decisions. Supersede reversals instead of rewriting
-earlier entries.
-```
-
-There is no special agent integration. The CLI emits bounded JSON; the source
-of truth remains a file any tool can read.
-
-## Command reference
+`--why` takes text, `-` for stdin, or is omitted to open `$EDITOR` (`$VISUAL`
+when `$EDITOR` is unset). In the editor, lines whose first non-space character
+is `#` are omitted. `--date YYYY-MM-DD` is for importing earlier decisions.
 
 | Command | Purpose |
 |---|---|
@@ -167,11 +66,36 @@ of truth remains a file any tool can read.
 | `where` | Print the resolved logbook path. |
 | `completions <shell>` | Generate a shell completion script. |
 
-Run `logbook <command> --help` for every option.
+`logbook <command> --help` lists every option.
 
-## The file
+`list`, `search` and `export` share date, tag, active/superseded and limit
+filters; repeated tags mean AND. `list` and `search` return the newest matches
+first; `show` keeps file order; `trace` keeps chain order; `export` keeps
+document order.
 
-The source of truth is ordinary Markdown:
+## Use with coding agents
+
+Give an agent a small current slice, not the whole log:
+`logbook list --active --limit 10`, `logbook export --active --limit 10`,
+`logbook check --format json`. There is no special agent integration: the CLI
+emits bounded JSON and the source of truth is a file any tool can read.
+
+Suggested repository instructions:
+
+```markdown
+Before product, architecture, or operational work, run
+`logbook list --active --limit 10` and treat those decisions as constraints.
+Record only new non-obvious decisions. Supersede reversals instead of rewriting
+earlier entries.
+```
+
+## Configuration
+
+- Path: the nearest `logbook.md` from the current directory up to the
+  repository root. `--file PATH` or `LOGBOOK_FILE` override it.
+- Editor: `$EDITOR`, then `$VISUAL`.
+
+## File format
 
 ```markdown
 ## 2026-08-01 — use SQLite for local state
@@ -187,43 +111,26 @@ The source of truth is ordinary Markdown:
 **tags:** storage
 ```
 
-Hand edits remain possible. Writes use an adjacent atomic replacement and a
-short-lived cross-process lock, so a crash cannot leave a partial entry and
-concurrent writers do not lose one. In multiline fields passed by flag or
-stdin, indent any literal line beginning with `## ` or a canonical field label
-such as `**risk:**`; the CLI rejects an unindented structural line instead of
-saving ambiguous Markdown. In the editor, lines whose first non-space character
-is `#` are comments and are omitted.
+A decision has one successor. `supersede` appends the replacement and leaves
+the old entry intact. `check` reports malformed entries and broken, ambiguous,
+duplicate or branched links.
 
-Writes refuse a `logbook.md` symlink because atomic replacement would overwrite
-the link itself; pass `--file` the target path instead. If a crashed process
-leaves `<logbook path>.lock`, first verify no logbook writer is running, remove
-that lock directory, and retry.
+Hand edits to `logbook.md` are possible; `check` catches malformed ones.
 
-## The boundary
+Writes use an atomic replacement and a cross-process lock.
 
-One repository. One file. Append-only. Local CLI. Git-native.
-
-The 0.5 series is feature-complete and in maintenance mode. Bug fixes,
-portability work, and dependency upkeep remain welcome; broader features do
-not. Logbook will not grow a GUI, hosted service, database, sync layer, plugin
-system, semantic search, daemon, telemetry, LLM integration, or automatic
-decision extraction. Those belong in other tools.
+- In multiline fields passed by flag or stdin, indent any line beginning with
+  `## ` or a field label such as `**risk:**`; unindented ones are rejected.
+- A `logbook.md` symlink is refused; pass `--file` with the target path.
+- A stale `<logbook path>.lock` directory left by a crash: confirm no writer is
+  running, remove it, retry.
 
 ## Development
 
 ```bash
 cargo test --locked
-cargo +1.85.0 test --locked
 cargo fmt --all -- --check
 cargo clippy --locked --all-targets -- -D warnings
-cargo build --release --locked
-cargo package --locked
 ```
 
-CI covers Linux, macOS, Windows, and the Rust 1.85 MSRV. See
-[CONTRIBUTING.md](CONTRIBUTING.md).
-
-## License
-
-[MIT](LICENSE)
+See [CONTRIBUTING.md](CONTRIBUTING.md). Licence: [MIT](LICENSE).
