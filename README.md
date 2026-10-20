@@ -62,7 +62,7 @@ reproduce real CLI output from fixed-date examples.
 ### Record a decision
 
 Pass the reason directly, pipe it on stdin with `--why -`, or omit `--why` to
-write it in `$VISUAL` or `$EDITOR`:
+write it in `$EDITOR` (or `$VISUAL` when `$EDITOR` is unset):
 
 ```bash
 logbook add "keep the API synchronous"
